@@ -24,6 +24,19 @@ object CompatChecker {
 
     private val runtime: ClassLoader = CompatChecker::class.java.classLoader
 
+    /** What the references are checked against: this runtime, or another app's classes (the Android app's APK). */
+    @Volatile private var against: ClassLoader = runtime
+
+    /**
+     * Checks against [loader] instead of this runtime, e.g. the Android app: its APK (translated) and the
+     * platform's android.jar, so the same scan tells what would fail on Android.
+     */
+    fun <T> against(loader: ClassLoader, block: () -> T): T {
+        val before = against
+        against = loader
+        try { return block() } finally { against = before }
+    }
+
     /** Accepts a .cs3 (translated statically first) or a .jar. */
     fun check(file: File): List<Issue> {
         val jar = if (file.extension == "jar") file else DexTranslator.translate(file)
@@ -62,7 +75,7 @@ object CompatChecker {
     }
 
     private fun load(name: String): Class<*>? =
-        runCatching { Class.forName(name.replace('/', '.'), false, runtime) }.getOrNull()
+        runCatching { Class.forName(name.replace('/', '.'), false, against) }.getOrNull()
 
     /** True if the class exists (in the extension or the runtime). */
     private fun checkClass(name: String, own: Map<String, ClassNode>, where: String, issues: MutableSet<Issue>): Boolean {

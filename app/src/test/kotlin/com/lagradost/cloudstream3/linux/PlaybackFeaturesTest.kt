@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.factory.discovery.NativeDiscovery
 import uk.co.caprica.vlcj.media.MediaSlaveType
@@ -234,5 +235,25 @@ class PlaybackFeaturesTest {
             player.release()
             factory.release()
         }
+    }
+
+    @Test
+    fun `continue watching starts with the source that played last`() = runBlocking {
+        suspend fun link(name: String, source: String, quality: Int, url: String) =
+            newExtractorLink(source, name, url) { this.quality = quality }
+        val title = "https://example.org/title/pixel_city"
+        assertEquals(null, LastSource.find("Demo", title, listOf(link("Vidplay", "Vidplay", 1080, "https://a/1.m3u8"))))
+        LastSource.remember("Demo", title, link("Vidplay 720p", "Vidplay", 720, "https://a/old-token.m3u8"))
+        assertEquals("Vidplay 720p", LastSource.name("Demo", title))
+        // Found again by name and server, though its address changed (tokens expire); the same quality first.
+        val now = listOf(link("Filemoon", "Filemoon", 1080, "https://b/1.m3u8"), link("Vidplay 720p", "Vidplay", 1080, "https://a/new-1080.m3u8"),
+            link("Vidplay 720p", "Vidplay", 720, "https://a/new-720.m3u8"))
+        assertEquals("https://a/new-720.m3u8", LastSource.find("Demo", title, now)?.url)
+        assertEquals("https://a/new-1080.m3u8", LastSource.find("Demo", title, now.take(2))?.url)
+        // Gone: nothing (the best source plays as usual); other titles and extensions keep their own.
+        assertEquals(null, LastSource.find("Demo", title, now.take(1)))
+        assertEquals(null, LastSource.find("Demo", "https://example.org/title/other", now))
+        assertEquals(null, LastSource.find("Other", title, now))
+        Unit
     }
 }

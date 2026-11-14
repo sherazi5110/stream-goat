@@ -60,6 +60,8 @@ fun rememberHomeState(): HomeState {
     LaunchedEffect(state.api, state.catalogVersion) {
         state.sections.clear()
         val api = state.api ?: return@LaunchedEffect
+        // Next start, this extension loads before the others so Home shows sooner (as in the official app).
+        api.sourcePlugin?.let { if (it != Settings.homePluginFile) Settings.homePluginFile = it }
         state.loading = true
         state.offline = false
         Engine.home(listOf(api)).collect { section ->

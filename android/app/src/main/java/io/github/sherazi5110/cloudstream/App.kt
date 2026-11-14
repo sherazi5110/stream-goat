@@ -43,7 +43,10 @@ object App {
 
     fun init(context: Context) {
         this.context = context
+        CrashReport.install()
         Network.init()
+        // NewPipe Extractor, as the official app sets it up (YouTube extensions call it directly).
+        runCatching { org.schabi.newpipe.extractor.NewPipe.init(com.lagradost.cloudstream3.DownloaderTestImpl.getInstance()) }
         io.github.sherazi5110.cloudstream.ui.ThemeState.load()
         // A profile switch changes the look, the library and which extensions show.
         Profiles.onChange {
@@ -56,15 +59,19 @@ object App {
         // Extensions that add or remove providers (Ultima, StreamPlay…) fire the official app's event: refresh.
         com.lagradost.cloudstream3.MainActivity.afterPluginsLoadedEvent += { PluginManager.bumpVersion() }
         scope.launch {
-            val failures = PluginManager.loadAll()
+            // Like the official app: Home's extension first (mainPluginsLoadedEvent), then the rest.
+            val failures = PluginManager.loadAll(onHomeLoaded = { ok ->
+                runCatching { com.lagradost.cloudstream3.MainActivity.mainPluginsLoadedEvent.invoke(ok) }
+            })
             if (failures.isNotEmpty()) Log.w("plugins", "Failed: ${failures.keys}")
-            // Like the official app: extensions waiting for every extension to load run now.
-            runCatching {
-                com.lagradost.cloudstream3.MainActivity.mainPluginsLoadedEvent.invoke(true)
-                com.lagradost.cloudstream3.MainActivity.afterPluginsLoadedEvent.invoke(true)
-            }
+            // Extensions waiting for every extension to load run now.
+            runCatching { com.lagradost.cloudstream3.MainActivity.afterPluginsLoadedEvent.invoke(true) }
             // Carry on with downloads that were running when the app closed.
             runCatching { Downloads.init() }
+            // Google Drive backup: when something changed (every 15 minutes, and when the app is put away).
+            CloudBackup.startAuto()
+            // Updates and the update check wait until the first screens have settled.
+            kotlinx.coroutines.delay(20_000)
             startupChecks()
         }
     }

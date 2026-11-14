@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.plugins
 
+import android.app.Activity
 import android.content.Context
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -58,6 +59,27 @@ data class PluginWrapper(
 object PluginManager {
     const val ONLINE_PLUGINS_FOLDER = "Extensions"
 
+    /** Installs an extension from its link, like the official app (AutoExtensions, StreamCenter install others). */
+    suspend fun downloadPlugin(
+        activity: Activity,
+        pluginUrl: String,
+        pluginHash: String?,
+        internalName: String,
+        repositoryUrl: String,
+        loadPlugin: Boolean,
+    ): Boolean = AppPlugins.installFile(pluginUrl, pluginHash, internalName, AppRepos.pluginPath(internalName, repositoryUrl, "cs3"), repositoryUrl, loadPlugin)
+
+    suspend fun downloadPlugin(
+        activity: Activity,
+        pluginUrl: String,
+        pluginHash: String?,
+        internalName: String,
+        file: File,
+        loadPlugin: Boolean,
+    ): Boolean = AppPlugins.installFile(pluginUrl, pluginHash, internalName, file, null, loadPlugin)
+
+    suspend fun deletePlugin(file: File): Boolean = AppPlugins.deleteFile(file)
+
     /** Loaded extensions by file path, like the official app. */
     val plugins: MutableMap<String, BasePlugin>
         get() = AppPlugins.loaded.mapValues { it.value.instance }.toMutableMap()
@@ -87,6 +109,33 @@ object PluginManager {
 
 object RepositoryManager {
     const val ONLINE_PLUGINS_FOLDER = "Extensions"
+
+    /** Repositories the official app suggests (it downloads the list); extensions read it. */
+    val PREBUILT_REPOSITORIES: Array<RepositoryData> by lazy {
+        com.lagradost.cloudstream3.CloudStreamApp.getKey<Array<RepositoryData>>("PREBUILT_REPOSITORIES") ?: emptyArray()
+    }
+
+    fun convertRawGitUrl(url: String): String = AppRepos.convertRawGitUrl(url)
+
+    suspend fun parseRepository(url: String): Repository? = AppRepos.parseRepository(url)?.let {
+        Repository(it.iconUrl, it.name, it.description, it.manifestVersion, it.pluginLists)
+    }
+
+    /**
+     * Adds a repository like the official app: stored as given, nothing fetched (MegaRepo and StreamCenter call this
+     * for each of their repositories on every start). Screens refresh only if it is new.
+     */
+    suspend fun addRepository(repository: RepositoryData) {
+        val added = AppRepos.addRepositoryData(
+            io.github.sherazi5110.cloudstream.RepositoryData(repository.iconUrl, repository.name, repository.url, repository.description)
+        )
+        if (added) AppPlugins.bumpVersion()
+    }
+
+    suspend fun removeRepository(context: Context, repository: RepositoryData) {
+        AppRepos.removeRepository(repository.url)
+        AppPlugins.bumpVersion()
+    }
 
     fun getRepositories(): Array<RepositoryData> =
         AppRepos.getRepositories().map { RepositoryData(it.iconUrl, it.name, it.url) }.toTypedArray()

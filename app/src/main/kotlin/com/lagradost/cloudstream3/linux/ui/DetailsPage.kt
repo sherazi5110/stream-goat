@@ -80,6 +80,11 @@ class DetailsPage(
                 groupIndex = groups().indexOfFirst { g -> g.second.any { it.data == last?.episodeData } }.coerceAtLeast(0)
                 (r.backgroundPosterUrl ?: r.posterUrl)?.let { backdropLayer.children.setAll(backdrop(it, r.posterHeaders, 0.35)) }
                 render()
+                // Start finding the sources of what Play would start, so pressing it starts sooner.
+                if (api !is com.lagradost.cloudstream3.linux.OfflineApi) target()?.let { t ->
+                    kotlinx.coroutines.delay(1200)
+                    if (scene != null) Engine.prefetch(api, t.data)
+                }
                 enrich(r)
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
@@ -264,8 +269,15 @@ class DetailsPage(
         val downloadAll = button("Download ${if (groups.size > 1) "these" else "all"}", Icons.DOWNLOAD, "btn-ghost", "btn-small") {
             val r = response ?: return@button
             val todo = season.filter { com.lagradost.cloudstream3.linux.Downloads.get(api.name, it.data) == null }
-            todo.forEach { com.lagradost.cloudstream3.linux.Downloads.start(api, r, it) }
-            Toasts.show(if (todo.isEmpty()) "Already downloading these" else "Downloading ${todo.size} episode(s)", "Downloads" to { LibraryPage.wantDownloads = true; Nav.window.show(Tab.LIBRARY) })
+            fun go(maxHeight: Int) {
+                todo.forEach { com.lagradost.cloudstream3.linux.Downloads.start(api, r, it, com.lagradost.cloudstream3.linux.Downloads.Choice(maxHeight = maxHeight)) }
+                Toasts.show("Downloading ${todo.size} episode(s)", "Downloads" to { LibraryPage.wantDownloads = true; Nav.window.show(Tab.LIBRARY) })
+            }
+            when {
+                todo.isEmpty() -> Toasts.show("Already downloading these")
+                com.lagradost.cloudstream3.linux.Settings.downloadAsk -> Nav.window.showOverlay(DownloadQualityChooser(todo.size) { go(it) })
+                else -> go(0)
+            }
         }.tooltip("Download every episode in this list for offline viewing")
         episodesBox.children.setAll(FlowPane(14.0, 10.0, label("Episodes", "h3"), selector, downloadAll).apply { alignment = Pos.CENTER_LEFT }, grid)
     }

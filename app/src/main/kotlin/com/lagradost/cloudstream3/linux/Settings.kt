@@ -180,6 +180,21 @@ object Settings {
         set(v) = put("auto_install_extensions", v)
 
     /** Downloads running at the same time (1–5). */
+    /** Start finding an episode's sources when its title page opens, so Play starts sooner. */
+    var prepareSources: Boolean
+        get() = string("prepare_sources", "true").toBoolean()
+        set(v) = put("prepare_sources", v)
+
+    /** Connections per download (like IDM): pieces of a file, or stream segments, fetched at the same time. */
+    var downloadConnections: Int
+        get() = string("download_connections", "8").toIntOrNull()?.coerceIn(1, 16) ?: 8
+        set(v) = put("download_connections", v.coerceIn(1, 16))
+
+    /** Ask which source and quality to download (otherwise the best one is picked). */
+    var downloadAsk: Boolean
+        get() = string("download_ask", "true").toBoolean()
+        set(v) = put("download_ask", v)
+
     var parallelDownloads: Int
         get() = string("parallel_downloads", "2").toIntOrNull()?.coerceIn(1, 5) ?: 2
         set(v) = put("parallel_downloads", v.coerceIn(1, 5))

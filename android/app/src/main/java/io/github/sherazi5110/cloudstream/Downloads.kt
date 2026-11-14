@@ -58,6 +58,14 @@ object Downloads {
         val created: Long = System.currentTimeMillis(),
         val source: String? = null, val headers: Map<String, String> = emptyMap(), val hls: Boolean = false,
         val subtitles: List<String> = emptyList(), val retried: Boolean = false,
+        /** What the viewer picked in the download chooser (null: the best source automatically). */
+        val prefName: String? = null, val prefSource: String? = null,
+        /** The highest quality to download (0: Settings → Player → Preferred quality). */
+        val maxHeight: Int = 0,
+        /** Multi-connection downloads: how many 4 MB pieces, and which are saved ("0110…"). */
+        val chunks: Int = 0, val chunksDone: String = "",
+        /** Bytes per second right now (not saved). */
+        val speed: Long = 0,
     ) {
         /** 0..1, or -1 when the size isn't known yet. */
         val progress: Double get() = when {
@@ -67,7 +75,25 @@ object Downloads {
             else -> -1.0
         }
         val isEpisode get() = label != null
+
+        /** Seconds left at the current speed, or -1 when it can't be told. */
+        val secondsLeft: Long get() {
+            if (state != State.RUNNING || speed <= 0) return -1
+            val remaining = when {
+                total > 0 -> total - bytes
+                segments > 0 && segmentsDone > 0 -> (bytes.toDouble() / segmentsDone * (segments - segmentsDone)).toLong()
+                else -> return -1
+            }
+            return (remaining / speed).coerceAtLeast(0)
+        }
     }
+
+    /** The viewer's choice in the download chooser: a source (by name and server) and the highest quality. */
+    data class Choice(val name: String? = null, val source: String? = null, val maxHeight: Int = 0)
+
+    /** Multi-connection downloads: piece size, and the smallest file worth splitting. */
+    private val CHUNK get() = System.getProperty("cs.download.chunk")?.toLongOrNull() ?: (4L * 1024 * 1024)
+    private val MIN_SPLIT get() = CHUNK * 2
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val items = ConcurrentHashMap<String, Item>()
@@ -146,7 +172,7 @@ object Downloads {
         schedule()
     }
 
-    fun start(api: MainAPI, response: LoadResponse, playable: Playable): Item {
+    fun start(api: MainAPI, response: LoadResponse, playable: Playable, choice: Choice? = null): Item {
         ensureLoaded()
         val id = id(api.name, playable.data)
         items[id]?.let { existing ->
@@ -156,7 +182,7 @@ object Downloads {
         val item = Item(
             id, Profiles.current.id, api.name, response.url, response.name, response.posterUrl, response.type.name,
             playable.data, playable.label.takeIf { Engine.playables(response).size > 1 }, playable.season, playable.episode,
-            playable.name,
+            playable.name, prefName = choice?.name, prefSource = choice?.source, maxHeight = choice?.maxHeight ?: 0,
         )
         items[id] = item
         save(); changed()
@@ -166,7 +192,7 @@ object Downloads {
 
     fun pause(id: String) {
         jobs.remove(id)?.cancel()
-        update(id) { if (it.state == State.DONE) it else it.copy(state = State.PAUSED) }
+        update(id) { if (it.state == State.DONE) it else it.copy(state = State.PAUSED, speed = 0) }
         schedule()
     }
 
@@ -179,7 +205,7 @@ object Downloads {
     fun delete(id: String) {
         jobs.remove(id)?.cancel()
         val item = items.remove(id) ?: return
-        item.file?.let { File(it).delete(); File("$it.part").delete() }
+        item.file?.let { File(it).delete(); File("$it.part").delete(); File("$it.parts").deleteRecursively() }
         item.subtitles.forEach { File(it).delete() }
         save(); changed()
         schedule()
@@ -194,16 +220,16 @@ object Downloads {
             jobs[item.id] = scope.launch {
                 try {
                     run(item.id)
-                    update(item.id) { it.copy(state = State.DONE, error = null) }
+                    update(item.id) { it.copy(state = State.DONE, error = null, speed = 0) }
                 } catch (t: Throwable) {
                     if (t is CancellationException) throw t
                     android.util.Log.w("downloads", "${item.title} ${item.label.orEmpty()}: $t")
                     val current = items[item.id]
                     if (current != null && !current.retried && current.source != null) {
                         // Links often expire: ask the extension again, once, and start over.
-                        current.file?.let { File(it).delete(); File("$it.part").delete() }
-                        update(item.id) { it.copy(state = State.QUEUED, source = null, bytes = 0, total = 0, segmentsDone = 0, segments = 0, retried = true) }
-                    } else update(item.id) { it.copy(state = State.FAILED, error = t.message ?: t.toString()) }
+                        current.file?.let { File(it).delete(); File("$it.part").delete(); File("$it.parts").deleteRecursively() }
+                        update(item.id) { it.copy(state = State.QUEUED, source = null, bytes = 0, total = 0, segmentsDone = 0, segments = 0, chunks = 0, chunksDone = "", speed = 0, retried = true) }
+                    } else update(item.id) { it.copy(state = State.FAILED, error = t.message ?: t.toString(), speed = 0) }
                 } finally {
                     jobs.remove(item.id)
                     schedule()
@@ -237,7 +263,10 @@ object Downloads {
             }
         }
         val usable = Engine.rank(links.distinctBy { it.url }).filter { it.type == ExtractorLinkType.VIDEO || it.type == ExtractorLinkType.M3U8 }
-        val link = usable.firstOrNull() ?: throw IOException(if (links.isEmpty()) "No sources found" else "No source can be downloaded (only streams like DASH or torrents)")
+        val chosen = item.prefName?.let { n -> usable.firstOrNull { it.name == n && it.source == item.prefSource } ?: usable.firstOrNull { it.name == n } }
+        // The chosen quality for a single-file source: the best one at or under it.
+        val capped = if (item.maxHeight > 0) usable.filter { it.quality in 1..item.maxHeight }.ifEmpty { null } else null
+        val link = chosen ?: capped?.firstOrNull() ?: usable.firstOrNull() ?: throw IOException(if (links.isEmpty()) "No sources found" else "No source can be downloaded (only streams like DASH or torrents)")
         val hls = link.type == ExtractorLinkType.M3U8 || link.url.substringBefore('?').endsWith(".m3u8")
         val base = baseName(item)
         val ext = if (hls) "ts" else link.url.substringBefore('?').substringAfterLast('.', "mp4").lowercase().takeIf { it in setOf("mp4", "mkv", "webm", "avi", "mov", "m4v", "ts") } ?: "mp4"
@@ -281,12 +310,13 @@ object Downloads {
         return app.baseClient.newCall(b.build()).execute()
     }
 
-    private suspend fun direct(item: Item) {
+    /** One connection (servers that don't send parts of a file, or small files). */
+    private suspend fun single(item: Item) {
         val file = File(item.file!!)
         val part = File(file.path + ".part")
         val have = part.length()
         get(item.source!!, item.headers, if (have > 0) "bytes=$have-" else null).use { r ->
-            if (r.code == 416 && have > 0) { part.renameTo(file); return }
+            if (r.code == 416 && have > 0) { place(part, file); return }
             if (!r.isSuccessful) throw IOException("HTTP ${r.code}")
             val append = r.code == 206 && have > 0
             val length = r.body.contentLength()
@@ -299,6 +329,7 @@ object Downloads {
                 val input = r.body.byteStream()
                 val buf = ByteArray(256 * 1024)
                 var lastTick = 0L
+                val meter = Meter()
                 while (true) {
                     coroutineContext.ensureActive()
                     val n = input.read(buf)
@@ -306,13 +337,136 @@ object Downloads {
                     out.write(buf, 0, n)
                     done += n
                     val now = System.currentTimeMillis()
-                    if (now - lastTick > 500) { lastTick = now; update(item.id, persist = false) { it.copy(bytes = done) }; save(force = false) }
+                    if (now - lastTick > 500) { lastTick = now; update(item.id, persist = false) { it.copy(bytes = done, speed = meter.tick(done)) }; save(force = false) }
                 }
             }
             if (total in 1 until done || (total > 0 && done < total)) throw IOException("Connection closed early")
             update(item.id) { it.copy(bytes = done, total = done) }
         }
-        part.renameTo(file)
+        place(part, file)
+    }
+
+    /**
+     * Like a download manager (IDM): the file is split into 4 MB pieces that several connections fetch at the same
+     * time, each written straight into its place. Saved pieces survive a pause, a restart or a dropped connection.
+     * Servers that don't send parts of a file get one connection ([single]).
+     */
+    private suspend fun direct(item: Item) {
+        val connections = Settings.downloadConnections
+        val total = if (connections > 1) runCatching { probe(item.source!!, item.headers) }.getOrNull() else null
+        if (total == null || total < MIN_SPLIT) return single(item)
+        try {
+            multi(item, total, connections)
+        } catch (e: NoRanges) {
+            single(item)
+        }
+    }
+
+    private class NoRanges : IOException("The server sent the whole file instead of a part")
+
+    /** The file's size when the server sends parts of it (Range requests), else null. */
+    private fun probe(url: String, headers: Map<String, String>): Long? =
+        get(url, headers, "bytes=0-0").use { r ->
+            if (r.code != 206) null else r.header("Content-Range")?.substringAfter('/')?.trim()?.toLongOrNull()
+        }
+
+    private fun chunkLength(i: Int, total: Long): Long = minOf(CHUNK, total - i.toLong() * CHUNK)
+
+    private suspend fun multi(item: Item, total: Long, connections: Int) {
+        val file = File(item.file!!)
+        val part = File(file.path + ".part")
+        val n = ((total + CHUNK - 1) / CHUNK).toInt()
+        val done = BooleanArray(n)
+        if (item.chunks == n && item.total == total && part.isFile && part.length() == total)
+            item.chunksDone.forEachIndexed { i, c -> if (i < n && c == '1') done[i] = true }
+        fun marks() = synchronized(done) { String(CharArray(n) { if (done[it]) '1' else '0' }) }
+        val received = java.util.concurrent.atomic.AtomicLong((0 until n).sumOf { if (done[it]) chunkLength(it, total) else 0L })
+        update(item.id) { it.copy(total = total, chunks = n, chunksDone = marks(), bytes = received.get()) }
+        val pending = java.util.concurrent.ConcurrentLinkedQueue((0 until n).filter { !done[it] })
+        val meter = Meter()
+        val lastTick = java.util.concurrent.atomic.AtomicLong(0)
+        fun tick(force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            val last = lastTick.get()
+            if (!force && now - last < 500) return
+            if (!lastTick.compareAndSet(last, now)) return
+            val bytes = received.get()
+            update(item.id, persist = false) { it.copy(bytes = bytes, chunksDone = marks(), speed = meter.tick(bytes)) }
+            save(force = false)
+        }
+        RandomAccessFile(part, "rw").use { raf ->
+            if (raf.length() != total) raf.setLength(total)
+            kotlinx.coroutines.coroutineScope {
+                repeat(connections.coerceAtMost(pending.size.coerceAtLeast(1))) {
+                    launch(Dispatchers.IO) {
+                        while (true) {
+                            val i = pending.poll() ?: break
+                            val from = i.toLong() * CHUNK
+                            val to = from + chunkLength(i, total) - 1
+                            var attempt = 0
+                            while (true) {
+                                ensureActive()
+                                var got = 0L
+                                try {
+                                    get(item.source!!, item.headers, "bytes=$from-$to").use { r ->
+                                        if (r.code == 200) throw NoRanges()
+                                        if (r.code != 206) throw IOException("HTTP ${r.code}")
+                                        val input = r.body.byteStream()
+                                        val buf = ByteArray(64 * 1024)
+                                        var pos = from
+                                        while (pos <= to) {
+                                            ensureActive()
+                                            val k = input.read(buf, 0, minOf(buf.size.toLong(), to - pos + 1).toInt())
+                                            if (k < 0) break
+                                            synchronized(raf) { raf.seek(pos); raf.write(buf, 0, k) }
+                                            pos += k; got += k
+                                            received.addAndGet(k.toLong())
+                                            tick()
+                                        }
+                                        if (pos != to + 1) throw IOException("Connection closed early")
+                                    }
+                                    synchronized(done) { done[i] = true }
+                                    tick(force = true)
+                                    break
+                                } catch (e: IOException) {
+                                    received.addAndGet(-got)
+                                    if (e is NoRanges || ++attempt >= 5) throw e
+                                    kotlinx.coroutines.delay(1000L * attempt)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (synchronized(done) { done.any { !it } }) throw IOException("Some pieces are missing")
+        update(item.id) { it.copy(bytes = total, chunksDone = marks(), speed = 0) }
+        place(part, file)
+    }
+
+    /** Puts the finished file in place (replacing an older one). */
+    private fun place(part: File, file: File) {
+        if (file.exists()) file.delete()
+        if (!part.renameTo(file)) throw IOException("Can't move the finished file to ${file.path}")
+    }
+
+    /** Download speed, smoothed: for "4.2 MB/s · 2 min left". */
+    private class Meter {
+        private var lastBytes = -1L
+        private var lastTime = 0L
+        private var speed = 0L
+
+        @Synchronized fun tick(bytes: Long): Long {
+            val now = System.nanoTime()
+            if (lastBytes < 0) { lastBytes = bytes; lastTime = now; return speed }
+            val dt = (now - lastTime) / 1e9
+            if (dt >= 0.4) {
+                val instant = ((bytes - lastBytes) / dt).toLong().coerceAtLeast(0)
+                speed = if (speed == 0L) instant else (speed * 0.7 + instant * 0.3).toLong()
+                lastBytes = bytes; lastTime = now
+            }
+            return speed
+        }
     }
 
     // ---------- HLS ----------
@@ -324,8 +478,18 @@ object Downloads {
     private fun text(url: String, headers: Map<String, String>): String =
         get(url, headers).use { r -> if (!r.isSuccessful) throw IOException("HTTP ${r.code} for playlist"); r.body.string() }
 
+    /** The qualities inside a stream source (its HLS master playlist's heights, best first); empty for a single file. */
+    suspend fun qualities(link: ExtractorLink): List<Int> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val hls = link.type == ExtractorLinkType.M3U8 || link.url.substringBefore('?').endsWith(".m3u8")
+        if (!hls) return@withContext emptyList()
+        val headers = link.getAllHeaders().toMutableMap().apply { if (keys.none { it.equals("user-agent", true) }) put("User-Agent", USER_AGENT) }
+        val master = runCatching { text(link.url, headers) }.getOrNull() ?: return@withContext emptyList()
+        Regex("RESOLUTION=\\d+x(\\d+)").findAll(master).mapNotNull { it.groupValues[1].toIntOrNull() }.filter { it > 0 }
+            .distinct().sortedDescending().toList()
+    }
+
     /** The variant closest to the preferred quality (highest when none is set). */
-    internal fun pickVariant(master: String, base: String): String? {
+    internal fun pickVariant(master: String, base: String, maxHeight: Int = Settings.preferredQuality): String? {
         val lines = master.lines().map { it.trim() }
         data class V(val url: String, val height: Int, val bandwidth: Long)
         val variants = lines.mapIndexedNotNull { i, l ->
@@ -336,7 +500,7 @@ object Downloads {
             V(resolveUrl(base, uri), height, bw)
         }
         if (variants.isEmpty()) return null
-        val preferred = Settings.preferredQuality.takeIf { it > 0 }
+        val preferred = maxHeight.takeIf { it > 0 }
         val ok = preferred?.let { p -> variants.filter { it.height in 1..p } }.orEmpty()
         return (ok.ifEmpty { variants }).maxWith(compareBy<V> { it.height }.thenBy { it.bandwidth }).url
     }
@@ -392,33 +556,53 @@ object Downloads {
         if (init != null && item.file!!.endsWith(".ts")) item0 = update(item.id) { it.copy(file = it.file!!.removeSuffix(".ts") + ".mp4") } ?: item
         val file = File(item0.file!!)
         val part = File(file.path + ".part")
-        var startAt = item0.segmentsDone.coerceAtMost(segments.size)
-        if (startAt == 0 || !part.isFile || part.length() < item0.bytes) { startAt = 0; part.delete() }
-        update(item.id) { it.copy(segments = segments.size, segmentsDone = startAt) }
-        val keys = mutableMapOf<String, ByteArray>()
-        RandomAccessFile(part, "rw").use { out ->
-            var written = if (startAt == 0) 0L else item0.bytes
-            out.setLength(written); out.seek(written)
-            if (startAt == 0 && init != null) {
-                val bytes = fetch(init, headers, null)
-                out.write(bytes); written += bytes.size
-            }
-            for (i in startAt until segments.size) {
-                coroutineContext.ensureActive()
-                val s = segments[i]
-                var bytes = fetch(s.url, headers, s.range)
-                if (s.keyUrl != null) {
-                    val key = keys.getOrPut(s.keyUrl) { fetch(s.keyUrl, headers, null) }
-                    val iv = s.iv ?: ByteArray(16).also { b -> var v = s.sequence; for (k in 15 downTo 8) { b[k] = (v and 0xff).toByte(); v = v shr 8 } }
-                    bytes = Cipher.getInstance("AES/CBC/PKCS5Padding").apply { init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv)) }.doFinal(bytes)
+        // Several segments at a time (like a download manager), each saved as its own piece, joined in order at the end.
+        val dir = File(file.path + ".parts").apply { mkdirs() }
+        if (part.isFile && dir.listFiles().isNullOrEmpty()) part.delete()   // left by an older version: start over
+        fun piece(i: Int) = File(dir, "%05d".format(i))
+        val doneCount = java.util.concurrent.atomic.AtomicInteger(segments.indices.count { piece(it).isFile })
+        val written = java.util.concurrent.atomic.AtomicLong(segments.indices.sumOf { piece(it).takeIf { f -> f.isFile }?.length() ?: 0L })
+        update(item.id) { it.copy(segments = segments.size, segmentsDone = doneCount.get(), bytes = written.get()) }
+        val keys = ConcurrentHashMap<String, ByteArray>()
+        val pending = java.util.concurrent.ConcurrentLinkedQueue(segments.indices.filter { !piece(it).isFile })
+        val meter = Meter()
+        val lastTick = java.util.concurrent.atomic.AtomicLong(0)
+        kotlinx.coroutines.coroutineScope {
+            repeat(Settings.downloadConnections.coerceAtMost(pending.size.coerceAtLeast(1))) {
+                launch(Dispatchers.IO) {
+                    while (true) {
+                        ensureActive()
+                        val i = pending.poll() ?: break
+                        val s = segments[i]
+                        var bytes = fetch(s.url, headers, s.range)
+                        if (s.keyUrl != null) {
+                            val key = keys[s.keyUrl] ?: fetch(s.keyUrl, headers, null).also { keys[s.keyUrl] = it }
+                            val iv = s.iv ?: ByteArray(16).also { b -> var v = s.sequence; for (k in 15 downTo 8) { b[k] = (v and 0xff).toByte(); v = v shr 8 } }
+                            bytes = Cipher.getInstance("AES/CBC/PKCS5Padding").apply { init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv)) }.doFinal(bytes)
+                        }
+                        val tmp = File(dir, "%05d.tmp".format(i))
+                        tmp.writeBytes(bytes)
+                        if (!tmp.renameTo(piece(i))) throw IOException("Can't save a piece in ${dir.path}")
+                        val d = doneCount.incrementAndGet()
+                        val w = written.addAndGet(bytes.size.toLong())
+                        val now = System.currentTimeMillis()
+                        val last = lastTick.get()
+                        if (now - last >= 500 && lastTick.compareAndSet(last, now)) {
+                            update(item.id, persist = false) { it.copy(segmentsDone = d, bytes = w, speed = meter.tick(w)) }
+                            save(force = false)
+                        }
+                    }
                 }
-                out.write(bytes); written += bytes.size
-                update(item.id, persist = false) { it.copy(segmentsDone = i + 1, bytes = written) }
-                save(force = false)
             }
-            update(item.id) { it.copy(total = written, bytes = written) }
         }
-        part.renameTo(file)
+        java.io.FileOutputStream(part).use { out ->
+            if (init != null) out.write(fetch(init, headers, null))
+            for (i in segments.indices) piece(i).inputStream().use { it.copyTo(out, 256 * 1024) }
+        }
+        val total = part.length()
+        dir.deleteRecursively()
+        place(part, file)
+        update(item.id) { it.copy(segmentsDone = segments.size, total = total, bytes = total, speed = 0) }
     }
 
     /** One segment or key, with a few retries for flaky connections. */
@@ -439,6 +623,8 @@ object Downloads {
     // ---------- JSON ----------
 
     private fun toJson(i: Item) = JSONObject().apply {
+        put("prefName", i.prefName ?: ""); put("prefSource", i.prefSource ?: ""); put("maxHeight", i.maxHeight)
+        put("chunks", i.chunks); put("chunksDone", i.chunksDone)
         put("id", i.id); put("profile", i.profile); put("apiName", i.apiName); put("url", i.url); put("title", i.title)
         put("poster", i.poster ?: ""); put("type", i.type); put("data", i.data); put("label", i.label ?: "")
         i.season?.let { put("season", it) }; i.episode?.let { put("episode", it) }; put("episodeName", i.episodeName ?: "")
@@ -460,6 +646,7 @@ object Downloads {
             o.optInt("segmentsDone"), o.optInt("segments"), s("error"), o.optLong("created"),
             s("source"), h?.keys()?.asSequence()?.associateWith { h.getString(it) }.orEmpty(), o.optBoolean("hls"),
             subs?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(), o.optBoolean("retried"),
+            s("prefName"), s("prefSource"), o.optInt("maxHeight"), o.optInt("chunks"), o.optString("chunksDone"),
         )
     }
 }

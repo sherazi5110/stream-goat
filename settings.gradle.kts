@@ -8,6 +8,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
+        // NewPipe Extractor (YouTube), as in the official app.
+        maven("https://jitpack.io")
     }
 }
 

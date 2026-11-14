@@ -31,6 +31,8 @@ sealed interface Screen {
     /** A Settings section opened on its own (portrait). */
     data class SettingsPage(val section: String) : Screen
     data class Repository(val url: String, val name: String) : Screen
+    /** Extensions → Add from phone: a QR code; links sent from a phone are added here. */
+    data object AddFromPhone : Screen
     /** Settings → Providers → Test all extensions. */
     data object ProviderTests : Screen
 }

@@ -45,7 +45,8 @@ object Vlc {
     val lib: LibVLC by lazy {
         LibVLC(App.context, arrayListOf(
             "--http-reconnect",
-            "--network-caching=3000",
+            // 1.5 s of buffer before playing (was 3 s): starts as quickly as the official app's player.
+            "--network-caching=1500",
             "--audio-time-stretch", // keeps the pitch at other speeds
             "--subsdec-encoding=UTF-8",
             "--freetype-rel-fontsize=16",
@@ -127,6 +128,8 @@ class PlayerController(
         player.setEventListener { e ->
             when (e.type) {
                 MediaPlayer.Event.Playing -> {
+                    // Next time (Continue Watching, Resume) this title starts with the same source.
+                    current?.takeIf { api !is io.github.sherazi5110.cloudstream.LiveApi }?.let { io.github.sherazi5110.cloudstream.LastSource.remember(api.name, response.url, it) }
                     playing = true; buffering = false; started = true; error = null; watchdog?.cancel()
                     if (!languagesApplied) { languagesApplied = true; main.postDelayed({ applyLanguages() }, 1500) }
                 }
@@ -144,13 +147,23 @@ class PlayerController(
         }
     }
 
+    /** These sources came from the 20-minute cache (or the search started on the title page). */
+    private var fromCache = false
+    private var refreshed = false
+
     private suspend fun findSources() {
+        fromCache = Engine.cached(api, playable.data)
         Engine.links(api, playable.data).collect { event ->
             when (event) {
                 is LinkEvent.Link -> {
                     val link = event.link
                     if (link.type == ExtractorLinkType.MAGNET || link.type == ExtractorLinkType.TORRENT) return@collect
                     if (links.none { it.url == link.url }) links.add(link)
+                    // The source that last played this title starts as soon as it's found (Continue Watching, Resume).
+                    if (autoPlay && current == null && io.github.sherazi5110.cloudstream.LastSource.find(api.name, response.url, listOf(link)) != null) {
+                        App.toast("Continuing with ${link.name}")
+                        play(link)
+                    }
                     onNewLink()
                 }
                 // Added to the player when picked in the Subtitles menu.
@@ -203,6 +216,8 @@ class PlayerController(
             }
             if (keep > 0) addOption(":start-time=${keep / 1000.0}")
         }
+        io.github.sherazi5110.cloudstream.CrashReport.playing("${api.name}: ${response.name} (${playable.label}); source ${link.name} [${link.type}] from " +
+            "${runCatching { Uri.parse(link.url).host }.getOrNull() ?: "?"}")
         player.media = media
         media.release()
         player.play()
@@ -255,6 +270,14 @@ class PlayerController(
         if (next != null) {
             App.toast("${current?.name ?: "Source"} failed, trying ${next.name}")
             play(next)
+        } else if (fromCache && !refreshed && api !is io.github.sherazi5110.cloudstream.LiveApi) {
+            // Every remembered source failed: they've probably expired. Ask the extension again, once.
+            refreshed = true
+            Engine.forget(api, playable.data)
+            links.clear(); tried.clear(); current = null
+            searching = true; error = null
+            App.toast("Those sources expired; looking again…")
+            scope.launch { findSources() }
         } else {
             // A TV channel has one stream: find out what stops it (an expired certificate, no answer…) and say so.
             if (api is io.github.sherazi5110.cloudstream.LiveApi) {
@@ -404,6 +427,12 @@ class PlayerController(
     }
 
     private var layout: VLCVideoLayout? = null
+
+    /** Detaches whichever view the video is on. */
+    private fun detachAll() {
+        if (layout != null) { player.detachViews(); layout = null }
+    }
+
     /** True while the video is on a SurfaceView (HDR output) rather than a TextureView. */
     var hdrSurface by mutableStateOf(false)
         private set
@@ -416,6 +445,7 @@ class PlayerController(
     }
 
     fun attach(layout: VLCVideoLayout) {
+        detachAll()
         this.layout = layout
         hdrSurface = io.github.sherazi5110.cloudstream.Picture.useHdrSurface(current, screenHdr)
         // TextureView, so pinch-to-zoom (a view transform) also scales the picture; SurfaceView for HDR.
@@ -425,16 +455,17 @@ class PlayerController(
 
     /** A new source may need the other kind of surface (HDR or not): re-attach before it plays. */
     private fun matchSurface(link: ExtractorLink) {
-        val l = layout ?: return
         val want = io.github.sherazi5110.cloudstream.Picture.useHdrSurface(link, screenHdr)
         if (want == hdrSurface) return
+        val l = layout ?: run { hdrSurface = want; return }
         player.detachViews()
         hdrSurface = want
         player.attachViews(l, null, true, !want)
         player.videoScale = zoom.scale
     }
 
-    fun detach() { player.detachViews(); layout = null }
+    /** A view leaving the screen: detach only if the video is still on it (the next view may already have taken over). */
+    fun detach(view: Any) { if (view === layout) detachAll() }
 
     /** Records progress for Continue Watching and the episode list. */
     fun save(finished: Boolean = false) {
@@ -448,11 +479,12 @@ class PlayerController(
     }
 
     fun release() {
+        io.github.sherazi5110.cloudstream.CrashReport.playing(null)
         save()
         scope.cancel()
         player.setEventListener(null)
         player.stop()
-        player.detachViews()
+        detachAll()
         player.release()
     }
 }

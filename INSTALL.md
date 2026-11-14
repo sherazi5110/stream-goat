@@ -55,14 +55,14 @@ with its own Java and **VLC included**: nothing else to install. 64-bit Windows 
 
 **Option A: in the terminal (recommended)**
 ```bash
-wget -O /tmp/cloudstream-linux.deb https://github.com/sherazi5110/stream-goat/releases/download/V8.0.0/streamgoat-linux_8.0.0_amd64.deb
+wget -O /tmp/cloudstream-linux.deb https://github.com/sherazi5110/stream-goat/releases/download/V8.0.1/streamgoat-linux_8.0.1_amd64.deb
 sudo apt install /tmp/cloudstream-linux.deb
 ```
 
 **Option B: with a file you downloaded in the browser**
 ```bash
 cd ~/Downloads
-sudo apt install ./streamgoat-linux_8.0.0_amd64.deb
+sudo apt install ./streamgoat-linux_8.0.1_amd64.deb
 ```
 Keep the `./`, which tells apt it's a file, not a package name.
 apt installs VLC's libraries automatically.
@@ -143,7 +143,7 @@ sudo zypper install vlc gtk3 libXtst6 Mesa-libGL1 binutils
 ### 2. Unpack the app
 ```bash
 cd /tmp
-wget -O cloudstream-linux.deb https://github.com/sherazi5110/stream-goat/releases/download/V8.0.0/streamgoat-linux_8.0.0_amd64.deb
+wget -O cloudstream-linux.deb https://github.com/sherazi5110/stream-goat/releases/download/V8.0.1/streamgoat-linux_8.0.1_amd64.deb
 mkdir -p cs-unpack && cd cs-unpack
 ar x ../cloudstream-linux.deb
 tar -xJf data.tar.xz
@@ -210,7 +210,7 @@ To update, unpack the new `.tar` over the old folder. To remove, delete the fold
 | Problem | Fix |
 |---|---|
 | "The built-in player needs VLC's libraries" | Install VLC (see above), then restart the app. |
-| `E: Unsupported file … given on commandline` | You typed the file name without `./` in front; use `sudo apt install ./streamgoat-linux_8.0.0_amd64.deb`. |
+| `E: Unsupported file … given on commandline` | You typed the file name without `./` in front; use `sudo apt install ./streamgoat-linux_8.0.1_amd64.deb`. |
 | `ar: command not found` | Install `binutils` (included in the step 1 commands). |
 | A site doesn't load | Settings → Network & DNS → pick a DNS-over-HTTPS provider. |
 | An extension misbehaves | Settings → Developer & logs → **Test** next to it, then copy the log into a bug report. |

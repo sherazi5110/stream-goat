@@ -39,5 +39,9 @@ class SyncRepo(override val api: SyncAPI) : AuthRepo(api) {
 class AccountManager {
     companion object {
         val aniListApi = AniListApi()
+        // CineStream creates a SyncRepo around Simkl when it loads; without it, that provider failed to load.
+        val simklApi = com.lagradost.cloudstream3.syncproviders.providers.SimklApi()
+        val malApi = com.lagradost.cloudstream3.syncproviders.providers.MALApi()
+        val kitsuApi = com.lagradost.cloudstream3.syncproviders.providers.KitsuApi()
     }
 }

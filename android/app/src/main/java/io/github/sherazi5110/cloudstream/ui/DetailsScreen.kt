@@ -127,6 +127,13 @@ private fun Details(api: MainAPI, r: LoadResponse) {
     var dub by remember(r) { mutableStateOf(dubs.firstOrNull()) }
     val seasons = remember(playables, dub) { playables.filter { it.dub == dub }.groupBy { it.season } }
     val target = remember(libraryVersion, r) { Playback.resumeTarget(api, r) }
+    // Start finding the sources of what Play would start (after a moment on the page), so pressing it starts sooner.
+    LaunchedEffect(target?.data) {
+        val t = target ?: return@LaunchedEffect
+        if (api is io.github.sherazi5110.cloudstream.OfflineApi) return@LaunchedEffect
+        kotlinx.coroutines.delay(1200)
+        io.github.sherazi5110.cloudstream.Engine.prefetch(api, t.data)
+    }
     var season by remember(r) { mutableStateOf(target?.season ?: seasons.keys.firstOrNull()) }
     val episodes = seasons[season].orEmpty()
     val bookmarked = remember(libraryVersion, r) { Library.isBookmarked(api.name, r.url) }

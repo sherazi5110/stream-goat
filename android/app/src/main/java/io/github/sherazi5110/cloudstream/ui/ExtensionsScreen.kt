@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -106,6 +107,7 @@ fun ExtensionsScreen() {
                 // Wraps onto a second line on narrow phones.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillButton("Add repository", Icons.Filled.Add) { adding = true }
+                    PillButton("Add from phone", Icons.Filled.PhoneAndroid, primary = false) { Nav.open(Screen.AddFromPhone) }
                     PillButton("Update all", Icons.Filled.Refresh, primary = false) {
                         busy = true
                         scope.launch {
@@ -338,6 +340,7 @@ private fun StremioTab() {
                     }
                 }
             }
+            PillButton("Add from phone (no typing)", Icons.Filled.PhoneAndroid, Modifier.padding(top = 10.dp), primary = false, compact = true) { Nav.open(Screen.AddFromPhone) }
             if (busy) Spinner(Modifier.fillMaxWidth().height(48.dp))
         }
         items(addons, key = { it.url }) { a ->

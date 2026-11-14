@@ -1,7 +1,8 @@
 package com.lagradost.cloudstream3.ui.player
 
 // The official app's player types (ui/player/IPlayer.kt, PlayerSubtitleHelper.kt), for extensions that control
-// the player (WatchParty, Ultima). This app's player is different, so they find no player to control.
+// the player (WatchParty, Ultima) or hand subtitles to it. This app's player is different, so they find no
+// player to control.
 
 enum class CSPlayerEvent(val value: Int) {
     Pause(0), Play(1), SeekForward(2), SeekBack(3), SkipCurrentChapter(4), NextEpisode(5), PrevEpisode(6),
@@ -21,7 +22,13 @@ data class SubtitleData(
     val headers: Map<String, String>,
     val languageCode: String?,
 ) {
-    val name: String get() = "$originalName $nameSuffix".trim()
+    val name: String get() = "$originalName $nameSuffix"
+
+    /** Unique per link, as in the official app. */
+    fun getId(): String = if (origin == SubtitleOrigin.EMBEDDED_IN_VIDEO) url else "$url|$name"
+
+    /** The URL with a protocol if the extension left it out. */
+    fun getFixedUrl(): String = if (url.startsWith("//")) "https:$url" else url
 }
 
 interface IPlayer {
@@ -35,4 +42,5 @@ interface IPlayer {
     fun getCurrentPreferredSubtitle(): SubtitleData?
     fun handleEvent(event: CSPlayerEvent, source: PlayerEventSource = PlayerEventSource.UI)
     fun isActive(): Boolean
+    fun getSubtitleOffset(): Long = 0
 }

@@ -146,13 +146,38 @@ suspend fun cli(args: List<String>): Int {
             else -> println(CloudStreamApp.getKey<Any>(pos[2]) ?: "(unset)")
         }
         "compat" -> {
-            val issues = CompatChecker.check(File(pos[1]))
-            if (issues.isEmpty()) println("OK: every class, method and field the extension uses exists in this runtime")
-            else {
-                println("${issues.size} unresolved reference(s):")
-                issues.groupBy { it.kind + " " + it.owner + "." + it.member }.forEach { (_, list) ->
-                    println("  ${list.first()}" + if (list.size > 1) "  +${list.size - 1} more" else "")
+            // compat [--android app.apk android.jar] file.cs3 [more.cs3 …]: several files give a summary.
+            val rest = args.drop(args.indexOf("compat") + 1).toMutableList()
+            val androidLoader = if (rest.firstOrNull() == "--android") {
+                val apk = File(rest[1]); val platform = File(rest[2]); repeat(3) { rest.removeAt(0) }
+                java.net.URLClassLoader(arrayOf(DexTranslator.translate(apk).toURI().toURL(), platform.toURI().toURL()), ClassLoader.getPlatformClassLoader())
+            } else null
+            val files = rest.map(::File)
+            val results = files.associateWith { f ->
+                runCatching { if (androidLoader != null) CompatChecker.against(androidLoader) { CompatChecker.check(f) } else CompatChecker.check(f) }
+            }
+            if (files.size == 1) {
+                val issues = results.values.single().getOrThrow()
+                if (issues.isEmpty()) println("OK: every class, method and field the extension uses exists in this runtime")
+                else {
+                    println("${issues.size} unresolved reference(s):")
+                    issues.groupBy { it.kind + " " + it.owner + "." + it.member }.forEach { (_, list) ->
+                        println("  ${list.first()}" + if (list.size > 1) "  +${list.size - 1} more" else "")
+                    }
                 }
+            } else {
+                val clean = results.count { it.value.getOrNull()?.isEmpty() == true }
+                println("$clean of ${files.size} extensions: every reference resolves")
+                results.forEach { (f, r) ->
+                    val issues = r.getOrElse { e -> println("ERROR ${f.parentFile?.name}/${f.name}: $e"); null } ?: return@forEach
+                    if (issues.isNotEmpty()) println("ISSUES ${f.parentFile?.name}/${f.nameWithoutExtension}: " +
+                        issues.map { "${it.kind} ${it.owner.replace('/', '.')}${if (it.member.isNotEmpty()) "." + it.member.substringBefore('(') else ""}" }.distinct().joinToString(" | "))
+                }
+                // Which missing pieces affect the most extensions.
+                val byMissing = results.flatMap { (f, r) -> r.getOrNull().orEmpty().map { i -> "${i.kind} ${i.owner.replace('/', '.')}${if (i.member.isNotEmpty()) "." + i.member.substringBefore('(') else ""}" to f.nameWithoutExtension }.distinct() }
+                    .groupBy({ it.first }, { it.second })
+                println("\nMost common:")
+                byMissing.entries.sortedByDescending { it.value.size }.take(40).forEach { (k, v) -> println("  ${v.size}  $k  (${v.take(4).joinToString()}${if (v.size > 4) ", …" else ""})") }
             }
         }
         "doctor" -> {

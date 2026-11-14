@@ -75,6 +75,10 @@ jobs:
           fi
 
       - name: Windows app (portable) and installer (.msi)
+        env:
+          # Google Drive backup: the project's Google sign-in client (docs/google-drive-setup.md); empty without it.
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           ./gradlew :app:packageWindows -PvlcDir="$VLC_DIR"
           ./gradlew :app:packageWindows -PvlcDir="$VLC_DIR" -PjpackageType=msi

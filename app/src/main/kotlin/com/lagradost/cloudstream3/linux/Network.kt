@@ -71,6 +71,8 @@ object Network {
 
     fun init() {
         android.webkit.CookieManager.backend = webCookies
+        // NewPipe Extractor, as the official app sets it up (YouTube extensions call it directly).
+        runCatching { org.schabi.newpipe.extractor.NewPipe.init(com.lagradost.cloudstream3.DownloaderTestImpl.getInstance()) }
         val cache = Cache(File(Platform.context.getCacheDir(), "http_cache"), 100L * 1024 * 1024)
         val dispatcher = Dispatcher().apply {
             maxRequests = 128

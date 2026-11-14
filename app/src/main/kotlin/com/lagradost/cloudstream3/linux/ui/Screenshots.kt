@@ -65,6 +65,9 @@ object Screenshots {
         if (System.getenv("CS_SCREENSHOT_ONLY") == "goat") {
             modeGoat(window, prefix)
         }
+        if (System.getenv("CS_SCREENSHOT_ONLY") == "dl8") {
+            modeDl8(window, prefix)
+        }
         if (System.getenv("CS_SCREENSHOT_ONLY") == "art") {
             modeArt(window, prefix)
         }
@@ -340,6 +343,25 @@ object Screenshots {
             (Playback.active as? BuiltinPlayer)?.showTranslate(); delay(1200); capture(window, "$prefix-player-translate.png")
             System.exit(0)
         }
+
+    /** CS_SCREENSHOT_ONLY=dl8: the download chooser (sources, then a stream's qualities). */
+    private suspend fun modeDl8(window: AppWindow, prefix: String) {
+        val m = "http://localhost:8766"
+        com.lagradost.cloudstream3.CloudStreamApp.setKey("demo_base_url", m)
+        val demo = com.lagradost.cloudstream3.linux.Engine.allProviders().firstOrNull { it.name.contains("Demo", true) }
+            ?: com.lagradost.cloudstream3.linux.PluginManager.loadPlugin(java.io.File("tests/DemoProvider/build/repo/Demo.cs3"),
+                com.lagradost.cloudstream3.linux.PluginData("Demo", null, false, "Demo.cs3", 1)).getOrThrow().providers.single()
+        val film = com.lagradost.cloudstream3.linux.Engine.load(demo, "$m/title/night_of_the_test_pattern")!!
+        val p = com.lagradost.cloudstream3.linux.Engine.playables(film).single()
+        com.lagradost.cloudstream3.linux.Settings.downloadAsk = true
+        DownloadsUi.start(demo, film, p)
+        delay(5000); capture(window, "$prefix-download-sources.png")
+        // A stream source: its qualities.
+        (window.scene.root.lookupAll(".source-row").toList().firstOrNull { n -> (n as? javafx.scene.Parent)?.lookupAll(".faint")?.any { (it as? javafx.scene.control.Label)?.text?.startsWith("Stream") == true } == true })
+            ?.fireEvent(javafx.scene.input.MouseEvent(javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0.0, 0.0, 0.0, 0.0, javafx.scene.input.MouseButton.PRIMARY, 1, false, false, false, false, true, false, false, false, false, false, null))
+        delay(3000); capture(window, "$prefix-download-qualities.png")
+        System.exit(0)
+    }
 
     /** CS_SCREENSHOT_ONLY=art: the goat artwork (logo in both styles, the offline screen). */
     private suspend fun modeArt(window: AppWindow, prefix: String) {

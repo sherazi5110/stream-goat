@@ -35,6 +35,10 @@ jobs:
         run: ./gradlew :app:test
 
       - name: Build .deb and tarball
+        env:
+          # Google Drive backup: the project's Google sign-in client (docs/google-drive-setup.md); empty without it.
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           ./scripts/build-deb.sh
           ./gradlew :app:distTar
@@ -113,6 +117,9 @@ jobs:
           CS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           CS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           CS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Google Drive backup: the project's Google sign-in client (docs/google-drive-setup.md); empty without it.
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           VERSION_ARG=""

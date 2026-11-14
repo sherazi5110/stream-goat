@@ -52,6 +52,16 @@ The `.deb` and Flatpak bring everything they need (VLC is installed with the `.d
 `cloudstream-linux`, so a new `.deb` updates an older install. Run it as **Stream Goat** from your app menu, or
 `streamgoat` in a terminal. [More: INSTALL.md → Linux](INSTALL.md)
 
+## New in 8.0.1
+
+- **Google Drive backup:** sign in with a code (works on Android TV too) and your settings, profiles, lists,
+  history, repositories and extensions are backed up automatically to a hidden app folder in your Drive; restore
+  them on a new device or after reinstalling.
+- **Downloads like IDM:** files in 4 MB pieces over 8 connections at once, streams several segments at a time, with
+  speed and time left; pieces survive pauses and restarts. **Choose the source and quality** when you press Download.
+- **Continue Watching starts with the source you were using.** Windows/Linux: **Z** opens the Picture menu, **E**
+  toggles Anime enhance, and the menu says whether it's sharpening the video.
+
 ## New in 8.0: the big update
 
 - **A new look, drawn by Syed Ali Hamza.** The rainbow goat is the logo and the app icon everywhere (Windows, Linux,
@@ -87,7 +97,7 @@ The `.deb` and Flatpak bring everything they need (VLC is installed with the `.d
   (SRT, WebVTT), not subtitles burned into the picture. Windows, Linux and Android.
 - **Anime enhance** (Windows, Linux): low-resolution animation is upscaled to your screen inside VLC with Lanczos
   instead of a soft stretch, so line art stays crisp (measured on a 240p cartoon at 720p: 26.8 → 27.4 dB PSNR against
-  the original). Auto for anime and cartoons; also in the player's **Picture** menu (Z).
+  the original). Auto for anime and cartoons. In the player, the **Picture** menu (Z) says whether it's sharpening the video you're watching ("480p sharpened to 1080p"); **E** turns it on or off.
 - **HDR:** on Android, HDR10, HLG and Dolby Vision play in real HDR on HDR screens. On Windows and Linux the player
   can't output HDR, so HDR sources get a colour correction instead of looking grey and washed out.
 
@@ -286,7 +296,7 @@ Data lives in `~/.local/share/cloudstream-linux` (override with `CLOUDSTREAM_HOM
 - **`requiresResources`:** Android resource tables aren't decoded; such extensions get an empty `Resources`.
 - **WebView-based extensions** (e.g. Cloudflare challenges) don't work yet. Upstream's own JVM `WebViewResolver` is still unimplemented; the Sources panel says so when this is the cause.
 - Logs are in `~/.local/share/cloudstream-linux/logs/` (Settings → Storage → Logs); please attach `cloudstream.log` and `cloudstream-linux doctor` output to bug reports.
-- **YouTube** links (mostly trailers) depend on VLC's own YouTube support, which breaks often. Upstream uses NewPipe, which is only published on JitPack.
+- **YouTube** trailers depend on VLC's own YouTube support, which breaks often. Extensions that use NewPipe Extractor (like the official repository's YoutubeProvider) get it, as in the official app.
 - **Torrents** need `webtorrent-cli`.
 - Any other Android class an extension touches gets a placeholder. The extension loads, but calling that code throws. Run with `CS_LOG_LEVEL=3` for debug logs.
 

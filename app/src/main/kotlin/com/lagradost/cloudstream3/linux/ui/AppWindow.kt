@@ -40,7 +40,7 @@ import kotlin.system.exitProcess
 
 object AppInfo {
     const val NAME = "Stream Goat"
-    const val VERSION = "8.0.0"
+    const val VERSION = "8.0.1"
     const val CREDIT = "Syed Ali Hamza"
 }
 
@@ -352,6 +352,8 @@ class AppWindow(val stage: Stage) : StackPane() {
             // The splash stays up while extensions load: at least briefly, at most a few seconds.
             val loading = launch {
                 val failures = withContext(Engine.dispatcher) { PluginManager.loadAll() }
+                // Google Drive backup: when something changed, every 15 minutes.
+                com.lagradost.cloudstream3.linux.CloudBackup.startAuto()
                 if (failures.isNotEmpty()) {
                     Toasts.show("${failures.size} extension(s) failed to load", "Details" to { show(Tab.EXTENSIONS) }, 6.0)
                 }

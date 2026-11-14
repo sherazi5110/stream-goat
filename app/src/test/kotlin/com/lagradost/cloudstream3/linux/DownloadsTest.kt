@@ -100,6 +100,50 @@ class DownloadsTest {
     }
 
     @Test
+    fun `IDM-style downloads - pieces over several connections, the chosen source and quality`() = runBlocking {
+        val demo = PluginManager.loadPlugin(File(System.getProperty("demo.repo"), "Demo.cs3"), PluginData("Demo", null, false, "Demo.cs3", 1))
+            .getOrThrow().providers.single()
+        val film = Engine.load(demo, "$base/title/night_of_the_test_pattern")!!
+        val p = Engine.playables(film).single()
+        val links = mutableListOf<com.lagradost.cloudstream3.utils.ExtractorLink>()
+        Engine.links(demo, p.data).collect { if (it is LinkEvent.Link) links += it.link }
+        val mp4 = links.first { !it.url.contains(".m3u8") }
+        val stream = links.first { it.url.contains(".m3u8") }
+
+        // The chooser's qualities: the heights inside the stream source; none for a single file.
+        assertTrue(Downloads.qualities(stream).isNotEmpty(), "qualities of ${stream.url}")
+        assertTrue(Downloads.qualities(mp4).isEmpty())
+
+        // The file in 64 KB pieces over 4 connections (like IDM): byte-for-byte the same as the original.
+        System.setProperty("cs.download.chunk", (64 * 1024).toString())
+        val savedConnections = Settings.downloadConnections
+        Settings.downloadConnections = 4
+        try {
+            val item = waitFor(Downloads.start(demo, film, p, Downloads.Choice(mp4.name, mp4.source)).id)
+            assertEquals(Downloads.State.DONE, item.state, item.error)
+            val original = File(tests, "mock-archive/media/test_film_640.mp4")
+            assertTrue(item.chunks > 1, "split into ${item.chunks} pieces")
+            assertTrue(item.chunksDone.all { it == '1' })
+            assertTrue(original.readBytes().contentEquals(File(item.file!!).readBytes()), "same bytes as the original")
+            Downloads.delete(item.id)
+
+            // The stream source, chosen at its lowest quality: segments in parallel, joined in order.
+            val low = Downloads.qualities(stream).min()
+            val hls = waitFor(Downloads.start(demo, film, p, Downloads.Choice(stream.name, stream.source, low)).id)
+            assertEquals(Downloads.State.DONE, hls.state, hls.error)
+            assertTrue(hls.hls)
+            val segments = File(tests, "mock-archive/media/hls").listFiles { f -> f.name.endsWith(".ts") }!!.sortedBy { it.name }
+            val joined = segments.map { it.readBytes() }.reduce { a, b -> a + b }
+            assertTrue(joined.contentEquals(File(hls.file!!).readBytes()), "segments joined in order")
+            assertTrue(!File(hls.file!! + ".parts").exists(), "the pieces are cleaned up")
+        } finally {
+            System.clearProperty("cs.download.chunk")
+            Settings.downloadConnections = savedConnections
+        }
+        Unit
+    }
+
+    @Test
     fun `HLS playlists with keys, byte ranges and variants are read correctly`() {
         val master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nlow.m3u8\n" +
             "#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\nmid/720.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nhigh.m3u8\n"

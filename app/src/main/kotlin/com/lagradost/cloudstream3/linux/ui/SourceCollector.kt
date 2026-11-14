@@ -13,7 +13,10 @@ import kotlinx.coroutines.launch
  * Collects an extension's sources and subtitles. It starts on the loading screen and
  * keeps running during playback, so the player's Sources menu fills up over time.
  */
-class SourceCollector(private val api: MainAPI, private val playable: Playable) {
+class SourceCollector(private val api: MainAPI, private val playable: Playable, val refreshed: Boolean = false) {
+    /** The sources came from the 20-minute cache (or the search started on the title page). */
+    var fromCache = false
+        private set
     val links = mutableListOf<ExtractorLink>()
     val subtitles = mutableListOf<SubtitleFile>()
     var finished = false
@@ -32,6 +35,7 @@ class SourceCollector(private val api: MainAPI, private val playable: Playable) 
     fun start() {
         job?.cancel()
         links.clear(); subtitles.clear(); finished = false; error = null
+        fromCache = Engine.cached(api, playable.data)
         job = ui.launch {
             Engine.links(api, playable.data).collect { event ->
                 when (event) {

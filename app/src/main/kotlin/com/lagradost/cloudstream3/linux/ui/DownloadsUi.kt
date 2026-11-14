@@ -40,10 +40,17 @@ object DownloadsUi {
 
     fun status(i: Downloads.Item): String = when (i.state) {
         State.QUEUED -> "Waiting"
-        State.RUNNING -> if (i.progress >= 0) "${(i.progress * 100).toInt()}%" + (if (i.bytes > 0) " · ${human(i.bytes)}" else "") else "Starting…"
+        State.RUNNING -> (if (i.progress >= 0) "${(i.progress * 100).toInt()}%" + (if (i.bytes > 0) " · ${human(i.bytes)}" else "") else "Starting…") +
+            (if (i.speed > 0) " · ${human(i.speed)}/s" else "") + (i.secondsLeft.takeIf { it >= 0 }?.let { " · ${eta(it)} left" } ?: "")
         State.PAUSED -> "Paused" + (if (i.progress > 0) " at ${(i.progress * 100).toInt()}%" else "")
         State.DONE -> "Downloaded" + (if (i.total > 0) " · ${human(i.total)}" else "")
         State.FAILED -> "Failed: ${i.error ?: "unknown error"}"
+    }
+
+    fun eta(seconds: Long): String = when {
+        seconds >= 3600 -> "${seconds / 3600} h ${seconds % 3600 / 60} min"
+        seconds >= 60 -> "${seconds / 60} min"
+        else -> "$seconds s"
     }
 
     fun human(bytes: Long): String = when {
@@ -106,8 +113,14 @@ object DownloadsUi {
         javafx.scene.control.Tooltip.install(node, tip)
     }
 
+    /** Download: asks which source and quality first (Settings → Storage), then starts. */
     fun start(api: MainAPI, r: LoadResponse, p: Playable) {
-        Downloads.start(api, r, p)
+        if (com.lagradost.cloudstream3.linux.Settings.downloadAsk) Nav.window.showOverlay(DownloadChooser(api, r, p) { choice -> begin(api, r, p, choice) })
+        else begin(api, r, p, null)
+    }
+
+    private fun begin(api: MainAPI, r: LoadResponse, p: Playable, choice: Downloads.Choice?) {
+        Downloads.start(api, r, p, choice)
         Toasts.show("Downloading ${if (Engine.playables(r).size > 1) "${r.name} ${shortCode(p)}" else r.name}", "Downloads" to { LibraryPage.wantDownloads = true; Nav.window.show(Tab.LIBRARY) })
     }
 
@@ -192,5 +205,143 @@ object DownloadsUi {
                 button(null, Icons.DELETE, "btn-ghost", "btn-small") { Downloads.delete(i.id) }.tooltip(if (i.state == State.DONE) "Delete" else "Cancel and delete"),
             ))
         }
+    }
+}
+
+/**
+ * "Download": which source, then which quality inside it (stream sources hold several). "Best (automatic)" is
+ * first. Shown over the page; Settings → Storage → "Ask which source and quality" turns it off.
+ */
+class DownloadChooser(
+    private val api: MainAPI,
+    private val response: LoadResponse,
+    private val playable: Playable,
+    private val onPick: (Downloads.Choice?) -> Unit,
+) : StackPane(), Disposable {
+    private val sources = SourceCollector(api, playable)
+    private val list = VBox(8.0)
+    private val status = javafx.scene.layout.HBox(10.0)
+    private val heading = label("Download", "h2")
+    private var picking: com.lagradost.cloudstream3.utils.ExtractorLink? = null
+
+    init {
+        val scrim = javafx.scene.layout.Region().apply { styleClass += "scrim"; onClick { close() } }
+        val total = Engine.playables(response).size
+        val header = hbox(14.0,
+            vbox(4.0, heading, label(Playback.title(response, playable, total), "muted").apply { maxWidth = 600.0 }),
+            spacer(),
+            button(null, Icons.CLOSE, "btn-ghost") { close() }.tooltip("Close"),
+        )
+        val scroll = pageScroll(list).apply {
+            maxHeightProperty().bind(Nav.window.heightProperty().multiply(0.62))
+            prefViewportHeightProperty().bind(list.heightProperty())
+        }
+        val sheet = VBox(16.0, header, status, scroll).apply {
+            styleClass += "sheet"
+            pad(24.0, 26.0, 24.0, 26.0)
+            maxWidth = 780.0
+            maxHeight = javafx.scene.layout.Region.USE_PREF_SIZE
+            setOnMouseClicked { it.consume() }
+        }
+        children.addAll(scrim, sheet)
+        StackPane.setAlignment(sheet, Pos.CENTER)
+        sources.onUpdate { if (picking == null) renderSources() }
+        sources.start()
+        renderSources()
+    }
+
+    private fun usable() = sources.ranked().filter {
+        it.source != OfflineApi.SOURCE && (it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.VIDEO || it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8)
+    }
+
+    private fun renderSources() {
+        heading.text = "Download: choose a source"
+        val links = usable()
+        status.children.setAll(listOfNotNull(
+            if (!sources.finished) javafx.scene.control.ProgressIndicator().apply { setPrefSize(18.0, 18.0) } else null,
+            label(when {
+                !sources.finished && links.isEmpty() -> "Looking for sources…"
+                !sources.finished -> "${links.size} source(s) so far, still searching…"
+                links.isEmpty() -> "No source here can be saved (only streams like DASH or torrents)"
+                else -> "${links.size} source(s) · downloads use ${com.lagradost.cloudstream3.linux.Settings.downloadConnections} connections at once"
+            }, "muted"),
+        ))
+        val rows = mutableListOf<Node>()
+        rows += row("Best (automatic)", "The best source at your preferred quality, like Play does", "AUTO", best = true) { pick(null) }
+        links.forEach { link ->
+            val q = com.lagradost.cloudstream3.utils.Qualities.getStringByInt(link.quality).ifEmpty { "AUTO" }
+            val host = runCatching { java.net.URI(link.url).host }.getOrNull()?.removePrefix("www.") ?: ""
+            val stream = link.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8 || link.url.substringBefore('?').endsWith(".m3u8")
+            rows += row(link.name, listOf(if (stream) "Stream (choose its quality next)" else "File", host).filter { it.isNotBlank() }.joinToString("  ·  "), q, best = false) {
+                if (stream) qualities(link) else pick(Downloads.Choice(link.name, link.source))
+            }
+        }
+        list.children.setAll(rows)
+    }
+
+    /** A stream source: its qualities (from its playlist), best first. */
+    private fun qualities(link: com.lagradost.cloudstream3.utils.ExtractorLink) {
+        picking = link
+        heading.text = "Download: choose a quality"
+        status.children.setAll(javafx.scene.control.ProgressIndicator().apply { setPrefSize(18.0, 18.0) }, label("Reading ${link.name}'s qualities…", "muted"))
+        list.children.clear()
+        ui.launch {
+            val heights = Downloads.qualities(link)
+            if (heights.size <= 1) { pick(Downloads.Choice(link.name, link.source, heights.firstOrNull() ?: 0)); return@launch }
+            status.children.setAll(label("${link.name} · ${heights.size} qualities", "muted"))
+            list.children.setAll(heights.map { h ->
+                row("${h}p", if (h == heights.first()) "Best in this source" else "Smaller file", "${h}p", best = h == heights.first()) {
+                    pick(Downloads.Choice(link.name, link.source, h))
+                }
+            } + row("Back to sources", null, "↩", best = false) { picking = null; renderSources() })
+        }
+    }
+
+    private fun row(title: String, sub: String?, pill: String, best: Boolean, onClick: () -> Unit): Node {
+        val text = vbox(3.0, label(title, "bold"), label(sub ?: "", "faint", "small").apply { isVisible = sub != null; isManaged = sub != null })
+        return hbox(14.0, label(pill, "quality-pill"), text, spacer(), icon(Icons.DOWNLOAD, 20.0).apply { styleClass += "accent-icon" }).apply {
+            styleClass += "source-row"
+            if (best) styleClass += "best"
+            onClick { onClick() }
+        }
+    }
+
+    private fun pick(choice: Downloads.Choice?) {
+        close()
+        onPick(choice)
+    }
+
+    private fun close() {
+        sources.cancel()
+        Nav.window.closeOverlay()
+    }
+
+    override fun dispose() { sources.cancel() }
+}
+
+/** "Download these" (a season): one quality for all of them, or the best. */
+class DownloadQualityChooser(private val count: Int, private val onPick: (Int) -> Unit) : StackPane() {
+    init {
+        val scrim = javafx.scene.layout.Region().apply { styleClass += "scrim"; onClick { Nav.window.closeOverlay() } }
+        val rows = listOf(0 to "Best (your preferred quality)", 1080 to "1080p", 720 to "720p", 480 to "480p", 360 to "360p").map { (h, name) ->
+            hbox(14.0, label(if (h == 0) "AUTO" else "${h}p", "quality-pill"), label(name, "bold"), spacer(), icon(Icons.DOWNLOAD, 20.0).apply { styleClass += "accent-icon" }).apply {
+                styleClass += "source-row"
+                if (h == 0) styleClass += "best"
+                onClick { Nav.window.closeOverlay(); onPick(h) }
+            }
+        }
+        val sheet = VBox(16.0,
+            hbox(14.0, vbox(4.0, label("Download $count episode(s)", "h2"), label("Highest quality to save (each episode gets the best source up to it)", "muted")), spacer(),
+                button(null, Icons.CLOSE, "btn-ghost") { Nav.window.closeOverlay() }),
+            VBox(8.0, *rows.toTypedArray()),
+        ).apply {
+            styleClass += "sheet"
+            pad(24.0, 26.0, 24.0, 26.0)
+            maxWidth = 620.0
+            maxHeight = javafx.scene.layout.Region.USE_PREF_SIZE
+            setOnMouseClicked { it.consume() }
+        }
+        children.addAll(scrim, sheet)
+        StackPane.setAlignment(sheet, Pos.CENTER)
     }
 }

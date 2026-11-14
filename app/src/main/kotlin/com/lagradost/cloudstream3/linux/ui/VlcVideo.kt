@@ -131,6 +131,22 @@ class VideoView : Region() {
     /** Anime enhance: VLC upscales small video to the screen (Lanczos) instead of JavaFX stretching it. Set before playing. */
     @Volatile var upscale = false
 
+    /** The video's own size (0 until it starts). */
+    @Volatile var sourceW = 0
+        private set
+    @Volatile var sourceH = 0
+        private set
+
+    /**
+     * The height anime enhance sharpens this video up to (your screen's), or null when the video isn't noticeably
+     * smaller than the screen (then there's nothing to sharpen).
+     */
+    fun enhanceTarget(): Int? {
+        if (sourceW <= 0 || sourceH <= 0) return null
+        val fit = screenFit(sourceW, sourceH)
+        return if (fit > 1.15) (sourceH * fit).roundToInt() else null
+    }
+
     /** HDR shown as SDR looks grey: more contrast and saturation, a little darker. */
     var hdrFix = false
         set(v) {
@@ -147,6 +163,7 @@ class VideoView : Region() {
     val surface: CallbackVideoSurface = CallbackVideoSurface(
         object : BufferFormatCallback {
             override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
+                sourceW = sourceWidth; sourceH = sourceHeight
                 val (w, h) = fitToScreen(sourceWidth, sourceHeight)
                 bufferW = w; bufferH = h
                 return BufferFormat("BGRA", w, h, intArrayOf(w * 4), intArrayOf(h))
@@ -198,11 +215,16 @@ class VideoView : Region() {
         image.image = null
     }
 
-    private fun fitToScreen(w: Int, h: Int): Pair<Int, Int> {
+    /** How many times the video fits on the largest screen. */
+    private fun screenFit(w: Int, h: Int): Double {
         val screens = runCatching { Screen.getScreens() }.getOrNull().orEmpty()
         val maxW = screens.maxOfOrNull { it.bounds.width * it.outputScaleX } ?: 1920.0
         val maxH = screens.maxOfOrNull { it.bounds.height * it.outputScaleY } ?: 1080.0
-        val fit = min(maxW / w, maxH / h)
+        return min(maxW / w, maxH / h)
+    }
+
+    private fun fitToScreen(w: Int, h: Int): Pair<Int, Int> {
+        val fit = screenFit(w, h)
         // Anime enhance: VLC scales small video all the way to the screen (Lanczos), so nothing is stretched after.
         val scale = if (upscale && fit > 1.15) fit else min(1.0, fit)
         if (scale == 1.0) return w to h

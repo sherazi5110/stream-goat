@@ -84,6 +84,9 @@ fun AppRoot() {
             }
             ProfileOverlays()
             UpdateDialog()
+            DownloadChooserDialog()
+            CrashDialog()
+            CloudDialogs()
         }
     }
 }
@@ -107,6 +110,7 @@ private fun Content(top: Screen?) {
         is Screen.Catalog -> CatalogScreen(top)
         is Screen.Repository -> RepositoryScreen(top)
         is Screen.ProviderTests -> ProviderTestsScreen()
+        is Screen.AddFromPhone -> AddFromPhoneScreen()
         is Screen.SettingsPage -> SettingsPageScreen(top)
         is Screen.Player, is Screen.WebPlayer -> Unit
     }

@@ -52,6 +52,8 @@ class MainActivity : com.lagradost.cloudstream3.MainActivity() {
     override fun onStop() {
         // Leaving the app during the intro: come back to the app itself.
         endIntro()
+        // Google Drive backup: save what changed before the app is put away.
+        CloudBackup.soon()
         super.onStop()
     }
 

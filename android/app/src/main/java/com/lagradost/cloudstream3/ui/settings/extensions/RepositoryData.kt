@@ -12,4 +12,7 @@ data class RepositoryData(
     @JsonProperty("description") val description: String? = null,
 ) {
     constructor(name: String, url: String) : this(null, name, url)
+
+    /** Older official versions had this one; MegaRepo still calls it. */
+    constructor(iconUrl: String?, name: String, url: String) : this(iconUrl, name, url, null)
 }

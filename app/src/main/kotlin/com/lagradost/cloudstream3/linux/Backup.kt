@@ -15,8 +15,11 @@ import java.io.File
 object Backup {
     const val FORMAT = "cloudstream-linxdroid-backup"
 
-    /** Settings stores that hold nothing worth moving (caches, this device's paths). */
-    private val skip = Regex("^(WebView|androidx|com\\.google|.*cache.*)", RegexOption.IGNORE_CASE)
+    /**
+     * Settings stores that hold nothing worth moving (caches, this device's paths), or that belong to this device
+     * only: its Google Drive sign-in (cloud_backup) and its last crash report (crash).
+     */
+    private val skip = Regex("^(WebView|androidx|com\\.google)|cache|^(cloud_backup|crash)$", RegexOption.IGNORE_CASE)
 
     private fun names(): List<String> = File(AppDirs.data, "prefs").listFiles { f -> f.name.endsWith(".json") }
         ?.map { it.name.removeSuffix(".json") }.orEmpty().filterNot { skip.containsMatchIn(it) }.sorted()

@@ -136,6 +136,27 @@ object PluginManager {
         System.err.println("Failed to load ${file.name}: $it")
     }
 
+    /** For the official PluginManager.downloadPlugin: extensions that install other extensions. */
+    suspend fun installFile(url: String, hash: String?, internalName: String, target: File, repositoryUrl: String?, load: Boolean): Boolean =
+        runCatching {
+            unloadPlugin(target.absolutePath)
+            RepositoryManager.download(url, target, hash)
+            val previous = installed().find { it.internalName == internalName }
+            val data = PluginData(internalName, url, true, target.absolutePath, previous?.version ?: 0, repositoryUrl ?: previous?.repositoryUrl, previous?.name ?: internalName)
+            record(data)
+            if (load) loadPlugin(target, data).getOrThrow()
+            changed()
+        }.isSuccess
+
+    /** For the official PluginManager.deletePlugin. */
+    fun deleteFile(file: File): Boolean {
+        unloadPlugin(file.absolutePath)
+        saveInstalled(installed().filter { File(it.filePath).absolutePath != file.absolutePath })
+        val ok = file.delete() || !file.exists()
+        changed()
+        return ok
+    }
+
     /** Port of upstream unloadPlugin: removes everything the plugin registered. */
     fun unloadPlugin(absolutePath: String) {
         val plugin = loaded.remove(absolutePath) ?: return
@@ -144,6 +165,7 @@ object PluginManager {
         APIHolder.apis.filter { it.sourcePlugin == owner }.forEach { APIHolder.removePluginMapping(it) }
         APIHolder.allProviders.withLock { APIHolder.allProviders.removeAll { it.sourcePlugin == owner } }
         extractorApis.withLock { extractorApis.removeAll { it.sourcePlugin == owner } }
+        com.lagradost.cloudstream3.actions.VideoClickActionHolder.removeFrom(owner)
         runCatching { plugin.loader.close() }
         android.content.res.AssetManager.unregister(java.io.File(absolutePath))
         changed()

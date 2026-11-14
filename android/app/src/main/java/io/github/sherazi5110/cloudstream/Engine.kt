@@ -1,5 +1,10 @@
 package io.github.sherazi5110.cloudstream
 
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.AnimeLoadResponse
 import com.lagradost.cloudstream3.HomePageList
@@ -57,10 +62,17 @@ data class SearchBatch(val api: MainAPI, val results: List<SearchResponse>, val 
 object Engine {
     private val threads = AtomicInteger()
 
-    /** Extension code runs on its own pool so a misbehaving extension cannot starve the UI or IO. */
+    /**
+     * Extension code runs on its own pool so a misbehaving extension cannot starve the UI or IO. Its threads run
+     * a little below normal priority, so the screen stays smooth while extensions parse pages.
+     */
     val dispatcher = Executors.newFixedThreadPool(64) { r ->
-        Thread(r, "extension-${threads.incrementAndGet()}").apply { isDaemon = true }
+        Thread({ runCatching { android.os.Process.setThreadPriority(EXTENSION_PRIORITY) }; r.run() },
+            "extension-${threads.incrementAndGet()}").apply { isDaemon = true }
     }.asCoroutineDispatcher()
+
+    /** Slightly below normal (0); 10 would be "background". */
+    const val EXTENSION_PRIORITY = 3
 
     private const val DEFAULT_TIMEOUT = 45_000L
 
@@ -152,19 +164,41 @@ object Engine {
      * the extension's own loadLinksTimeoutMs or the user's setting; links found before
      * the deadline are kept, which is how the Android player behaves too.
      */
-    fun links(api: MainAPI, data: String): Flow<LinkEvent> = channelFlow {
-        // A downloaded copy plays first (and works offline).
-        Downloads.localFile(api.name, data)?.let { send(LinkEvent.Link(OfflineApi.local(it))) }
-        val job = launch(dispatcher) {
+    /**
+     * One search for an episode's sources, shared by everyone who asks for them: the player, the search started
+     * when the title's page opened ([prefetch]) and the download chooser read the same results. A complete search
+     * is kept for [CACHE_MS] (like the official app's 20-minute link cache), so playing the same episode again
+     * starts at once.
+     */
+    private class Session(val started: Long) {
+        val events: MutableList<LinkEvent> = java.util.Collections.synchronizedList(mutableListOf())
+        val updates = kotlinx.coroutines.flow.MutableStateFlow(0)
+        @Volatile var done = false
+        /** Finished without an error or a timeout, with sources: worth keeping. */
+        @Volatile var complete = false
+        var job: Job? = null
+    }
+
+    private const val CACHE_MS = 20 * 60_000L
+    private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
+    private val sessionScope = CoroutineScope(SupervisorJob() + dispatcher)
+
+    private fun key(api: MainAPI, data: String) = api.name + "\u0000" + data
+
+    private fun session(api: MainAPI, data: String): Session = synchronized(sessions) {
+        val now = System.currentTimeMillis()
+        sessions.entries.removeIf { (_, s) -> s.done && now - s.started > CACHE_MS }
+        sessions[key(api, data)]?.let { s -> if (!s.done || s.complete) return s }
+        val s = Session(now)
+        sessions[key(api, data)] = s
+        fun add(e: LinkEvent) { s.events += e; s.updates.update { it + 1 } }
+        s.job = sessionScope.launch {
             var error: Throwable? = null
+            var found = 0
             val timeout = api.loadLinksTimeoutMs ?: (Settings.sourcesTimeoutSeconds * 1000L)
             val finished = try {
                 withTimeoutOrNull(timeout) {
-                    api.loadLinks(
-                        data, false,
-                        { trySend(LinkEvent.Subtitle(it)) },
-                        { trySend(LinkEvent.Link(it)) },
-                    )
+                    api.loadLinks(data, false, { add(LinkEvent.Subtitle(it)) }, { found++; add(LinkEvent.Link(it)) })
                     true
                 }
             } catch (t: Throwable) {
@@ -173,10 +207,40 @@ object Engine {
                 error = t
                 true
             }
-            send(LinkEvent.Done(error, timedOut = finished == null))
-            close()
+            s.complete = error == null && finished != null && found > 0
+            s.done = true
+            add(LinkEvent.Done(error, timedOut = finished == null))
         }
-        awaitClose { job.cancel() }
+        s
+    }
+
+    /** Starts finding an episode's sources in the background (when its title page opens), if that isn't done yet. */
+    fun prefetch(api: MainAPI, data: String) {
+        if (Settings.prepareSources) session(api, data)
+    }
+
+    /** Whether an episode's sources are already known (cached or being found), so playing it starts sooner. */
+    fun cached(api: MainAPI, data: String): Boolean = sessions[key(api, data)]?.let { it.complete } == true
+
+    /** Forgets an episode's cached sources (they all failed: probably expired), so the next search asks again. */
+    fun forget(api: MainAPI, data: String) {
+        synchronized(sessions) { sessions.remove(key(api, data)) }
+    }
+
+    fun links(api: MainAPI, data: String): Flow<LinkEvent> = channelFlow {
+        // A downloaded copy plays first (and works offline).
+        Downloads.localFile(api.name, data)?.let { send(LinkEvent.Link(OfflineApi.local(it))) }
+        val s = session(api, data)
+        var i = 0
+        s.updates.first {
+            while (true) {
+                val e = synchronized(s.events) { s.events.getOrNull(i) } ?: break
+                i++
+                send(e)
+                if (e is LinkEvent.Done) return@first true
+            }
+            false
+        }
     }
 
     /** Collects everything at once.*/

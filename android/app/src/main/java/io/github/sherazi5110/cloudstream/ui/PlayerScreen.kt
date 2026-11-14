@@ -228,7 +228,7 @@ fun PlayerScreen(screen: Screen.Player) {
         key(c) {
             AndroidView(
                 factory = { ctx -> VLCVideoLayout(ctx).also { c.attach(it) } },
-                onRelease = { c.detach() },
+                onRelease = { c.detach(it) },
                 modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = if (c.hdrSurface) 1f else pinch, scaleY = if (c.hdrSurface) 1f else pinch),
             )
         }

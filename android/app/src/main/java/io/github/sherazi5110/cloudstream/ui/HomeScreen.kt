@@ -4,6 +4,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CheckBox
@@ -93,11 +94,17 @@ private fun NoExtensions() {
     val progress by io.github.sherazi5110.cloudstream.PluginManager.progress.collectAsState()
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (progress.running) Spinner()
-        else EmptyState(
-            "Welcome to Stream Goat",
-            "Add a repository and install an extension to fill Home. Extensions are the same ones the official app uses.",
-            button = "Add extensions",
-        ) { Nav.select(Tab.EXTENSIONS) }
+        else androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            EmptyState(
+                "Welcome to Stream Goat",
+                "Add a repository and install an extension to fill Home. Extensions are the same ones the official app uses.",
+                button = "Add extensions",
+            ) { Nav.select(Tab.EXTENSIONS) }
+            // After reinstalling (or on a new device): everything back from the Google Drive backup.
+            if (io.github.sherazi5110.cloudstream.CloudBackup.configured) {
+                PillButton("Restore from Google Drive", Icons.Filled.CloudDownload, primary = false) { CloudUi.restoreFromDrive() }
+            }
+        }
     }
 }
 

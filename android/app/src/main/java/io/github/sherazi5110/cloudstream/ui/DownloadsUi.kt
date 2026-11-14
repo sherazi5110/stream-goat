@@ -79,10 +79,17 @@ object DownloadsUi {
 
     fun status(i: Downloads.Item): String = when (i.state) {
         State.QUEUED -> "Waiting"
-        State.RUNNING -> if (i.progress >= 0) "${(i.progress * 100).toInt()}%" + (if (i.bytes > 0) " · ${human(i.bytes)}" else "") else "Starting…"
+        State.RUNNING -> (if (i.progress >= 0) "${(i.progress * 100).toInt()}%" + (if (i.bytes > 0) " · ${human(i.bytes)}" else "") else "Starting…") +
+            (if (i.speed > 0) " · ${human(i.speed)}/s" else "") + (i.secondsLeft.takeIf { it >= 0 }?.let { " · ${eta(it)} left" } ?: "")
         State.PAUSED -> "Paused" + (if (i.progress > 0) " at ${(i.progress * 100).toInt()}%" else "")
         State.DONE -> "Downloaded" + (if (i.total > 0) " · ${human(i.total)}" else "")
         State.FAILED -> "Failed: ${i.error ?: "unknown error"}"
+    }
+
+    fun eta(seconds: Long): String = when {
+        seconds >= 3600 -> "${seconds / 3600} h ${seconds % 3600 / 60} min"
+        seconds >= 60 -> "${seconds / 60} min"
+        else -> "$seconds s"
     }
 
     fun human(bytes: Long): String = when {
@@ -91,12 +98,21 @@ object DownloadsUi {
         else -> "${bytes / 1024} KB"
     }
 
+    /** What the download chooser is asked about (shown by [ChooserDialog] in AppRoot). */
+    class Request(val api: MainAPI, val r: LoadResponse, val p: Playable)
+    var request by mutableStateOf<Request?>(null)
+
+    /** Download: asks which source and quality first (Settings → Downloads), then starts. */
     fun start(context: android.content.Context, api: MainAPI, r: LoadResponse, p: Playable) {
         // The progress notification needs permission on Android 13+ (downloads work either way).
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             context.findActivity()?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7) }
         }
-        Downloads.start(api, r, p)
+        if (io.github.sherazi5110.cloudstream.Settings.downloadAsk) request = Request(api, r, p) else begin(api, r, p, null)
+    }
+
+    fun begin(api: MainAPI, r: LoadResponse, p: Playable, choice: Downloads.Choice?) {
+        Downloads.start(api, r, p, choice)
         App.toast("Downloading ${if (Engine.playables(r).size > 1) "${r.name} ${p.label}" else r.name}")
     }
 
@@ -215,5 +231,84 @@ private fun DownloadLine(item: Downloads.Item) {
             Icon(Icons.Filled.Delete, "Delete", tint = Palette.muted, modifier = Modifier.size(36.dp).card(CircleShape) { Downloads.delete(item.id) }.padding(8.dp))
         }
         DownloadsUi.Menu(menu, item) { menu = false }
+    }
+}
+
+/**
+ * "Download": which source, then which quality inside it (stream sources hold several). "Best (automatic)" first.
+ * Works with touch and the TV remote.
+ */
+@Composable
+fun DownloadChooserDialog() {
+    val req = DownloadsUi.request ?: return
+    val links = androidx.compose.runtime.remember(req) { androidx.compose.runtime.mutableStateListOf<com.lagradost.cloudstream3.utils.ExtractorLink>() }
+    var finished by remember(req) { mutableStateOf(false) }
+    var stream by remember(req) { mutableStateOf<com.lagradost.cloudstream3.utils.ExtractorLink?>(null) }
+    var heights by remember(req) { mutableStateOf<List<Int>?>(null) }
+    androidx.compose.runtime.LaunchedEffect(req) {
+        Engine.links(req.api, req.p.data).collect { e ->
+            if (e is io.github.sherazi5110.cloudstream.LinkEvent.Link) {
+                val l = e.link
+                val ok = l.source != OfflineApi.SOURCE && (l.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.VIDEO || l.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8)
+                if (ok && links.none { it.url == l.url }) links.add(l)
+            }
+            if (e is io.github.sherazi5110.cloudstream.LinkEvent.Done) finished = true
+        }
+        finished = true
+    }
+    androidx.compose.runtime.LaunchedEffect(stream) {
+        val s = stream ?: return@LaunchedEffect
+        heights = null
+        val h = Downloads.qualities(s)
+        if (h.size <= 1) { DownloadsUi.request = null; DownloadsUi.begin(req.api, req.r, req.p, Downloads.Choice(s.name, s.source, h.firstOrNull() ?: 0)) }
+        else heights = h
+    }
+    fun pick(choice: Downloads.Choice?) { DownloadsUi.request = null; DownloadsUi.begin(req.api, req.r, req.p, choice) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = { DownloadsUi.request = null }) {
+        Column(Modifier.fillMaxWidth().background(Palette.surface, RoundedCornerShape(16.dp)).padding(18.dp)) {
+            Text(if (stream == null) "Download: choose a source" else "Download: choose a quality", style = MaterialTheme.typography.titleLarge)
+            Text(if (Engine.playables(req.r).size > 1) "${req.r.name} · ${req.p.label}" else req.r.name, style = MaterialTheme.typography.bodySmall,
+                color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val sorted = Engine.rank(links.toList())
+            Text(when {
+                stream != null && heights == null -> "Reading ${stream!!.name}'s qualities…"
+                stream != null -> "${stream!!.name} · ${heights!!.size} qualities"
+                !finished && sorted.isEmpty() -> "Looking for sources…"
+                !finished -> "${sorted.size} source(s) so far, still searching…"
+                sorted.isEmpty() -> "No source here can be saved"
+                else -> "${sorted.size} source(s) · ${io.github.sherazi5110.cloudstream.Settings.downloadConnections} connections at once"
+            }, style = MaterialTheme.typography.bodySmall, color = Palette.muted, modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
+            LazyColumn(Modifier.height(360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val s = stream
+                if (s == null) {
+                    item { ChooserRow("AUTO", "Best (automatic)", "The best source at your preferred quality", true) { pick(null) } }
+                    items(sorted, key = { it.url }) { l ->
+                        val isStream = l.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8 || l.url.substringBefore('?').endsWith(".m3u8")
+                        ChooserRow(com.lagradost.cloudstream3.utils.Qualities.getStringByInt(l.quality).ifEmpty { "AUTO" }, l.name,
+                            if (isStream) "Stream · choose its quality next" else "File", false) {
+                            if (isStream) stream = l else pick(Downloads.Choice(l.name, l.source))
+                        }
+                    }
+                } else heights?.let { hs ->
+                    items(hs) { h -> ChooserRow("${h}p", "${h}p", if (h == hs.first()) "Best in this source" else "Smaller file", h == hs.first()) { pick(Downloads.Choice(s.name, s.source, h)) } }
+                    item { ChooserRow("↩", "Back to sources", null, false) { stream = null; heights = null } }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChooserRow(pill: String, title: String, sub: String?, best: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().card(RoundedCornerShape(10.dp), onClick = onClick)
+        .background(if (best) Palette.accent.copy(alpha = 0.16f) else Palette.surfaceHigh, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(pill, style = MaterialTheme.typography.labelMedium, color = Color.White,
+            modifier = Modifier.background(Palette.accent, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp))
+        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            sub?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+        Icon(Icons.Filled.Download, null, tint = Palette.accent)
     }
 }

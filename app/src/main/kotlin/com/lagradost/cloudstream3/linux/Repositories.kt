@@ -131,6 +131,17 @@ object RepositoryManager {
     private fun saveRepositories(list: List<RepositoryData>) =
         prefs.edit().putString(REPOSITORIES_KEY, mapper.writeValueAsString(list)).apply()
 
+    /**
+     * Stores a repository as given, without fetching it (the official app's RepositoryManager.addRepository, which
+     * extensions like MegaRepo call on every start). False if it was already there.
+     */
+    fun addRepositoryData(data: RepositoryData): Boolean = synchronized(this) {
+        val current = getRepositories()
+        if (current.any { it.url == data.url }) return false
+        saveRepositories(current + data)
+        true
+    }
+
     /** Resolves [input] (url or shortcode), validates it is a repository, and stores it. */
     suspend fun addRepository(input: String): RepositoryData {
         val url = parseRepoUrl(input) ?: error("Not a repository url or shortcode: $input")
