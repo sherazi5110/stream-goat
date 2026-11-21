@@ -91,7 +91,10 @@ object CrashReport {
                 ApplicationExitInfo.REASON_CRASH_NATIVE -> "a crash inside native code (video engine or graphics)"
                 ApplicationExitInfo.REASON_CRASH -> "an error"
                 ApplicationExitInfo.REASON_ANR -> "not responding"
-                ApplicationExitInfo.REASON_LOW_MEMORY -> "low memory"
+                // Android closing the app in the background to free memory is normal, not a fault: only report it
+                // when it happened while the app was on screen.
+                ApplicationExitInfo.REASON_LOW_MEMORY ->
+                    if (last.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) "low memory (while on screen)" else return null
                 else -> return null
             }
             buildString {

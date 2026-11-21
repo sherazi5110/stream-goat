@@ -372,13 +372,24 @@ class SettingsPage : StackPane(), Refreshable {
     }
 
     private fun playback(): List<Node> {
-        val vlcEngine = Vlc.factory != null
+        // Never start VLC on the window's thread (it can take many seconds on Windows): show "Starting…" and fill
+        // the row in when it's ready.
+        val engineLabel = label("Starting…", "muted")
+        val vlcEngine = !Vlc.isLoaded || Vlc.factory != null
+        if (!Vlc.isLoaded) Vlc.warmUp { javafx.application.Platform.runLater {
+            val ok = Vlc.factory != null
+            engineLabel.text = if (ok) "Ready" else "Not installed"
+            engineLabel.styleClass.setAll("label", if (ok) "good-text" else "error-text")
+        } } else {
+            engineLabel.text = if (Vlc.factory != null) "Ready" else "Not installed"
+            engineLabel.styleClass.setAll("label", if (Vlc.factory != null) "good-text" else "error-text")
+        }
         val qualities = listOf(0, 2160, 1440, 1080, 720, 480)
         return listOf(
             section("Player",
                 row("Player engine", if (!vlcEngine) "VLC's libraries aren't available, so videos can't play. " + com.lagradost.cloudstream3.linux.Os.vlcHint else
-                    "Videos play inside this window using VLC ${Vlc.version.orEmpty()}: every format VLC plays, hardware decoding, source switching, online subtitles, audio languages, speed and zoom.",
-                    label(if (vlcEngine) "Ready" else "Not installed", if (vlcEngine) "good-text" else "error-text")),
+                    "Videos play inside this window using VLC${if (Vlc.isLoaded) " " + Vlc.version.orEmpty() else ""}: every format VLC plays, hardware decoding, source switching, online subtitles, audio languages, speed and zoom.",
+                    engineLabel),
                 row("Battery saver", "For low-end PCs and laptops on battery: skips the H.264 deblocking filter (much less CPU), buffers longer and does no extra processing. Hardware decoding stays on.",
                     Switch(Settings.batterySaver) { Settings.batterySaver = it; Vlc.optionsChanged(Playback.active != null) }),
                 row("Find sources before you press Play", "When a title's page opens, its sources are looked up in the background, so Play starts sooner. Found sources are kept for 20 minutes.",

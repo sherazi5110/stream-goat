@@ -1,5 +1,10 @@
 package io.github.sherazi5110.cloudstream.ui
 
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -306,9 +311,15 @@ fun RepositoryScreen(screen: Screen.Repository) {
                         "v${p.version}",
                         p.description,
                     ).joinToString(" · ")
+                    // Install/Uninstall swap the button for a spinner and back: keep the remote's selection on this row
+                    // (it used to jump to the top of the list).
+                    val keep = remember { FocusRequester() }
+                    var pressed by remember { mutableStateOf(false) }
+                    LaunchedEffect(working[p.internalName], have) { if (pressed) { kotlinx.coroutines.delay(60); runCatching { keep.requestFocus() } } }
                     ListRow(p.name, detail, p.iconUrl?.replace("%size%", "64")) {
+                      Box(Modifier.focusRequester(keep).onFocusChanged { if (it.hasFocus) pressed = true }.focusGroup()) {
                         when {
-                            working[p.internalName] == true -> Spinner(Modifier.size(40.dp))
+                            working[p.internalName] == true -> Spinner(Modifier.size(40.dp).focusable())
                             have == null -> IconAction(Icons.Filled.Download, "Install") {
                                 working[p.internalName] = true
                                 scope.launch {
@@ -323,6 +334,7 @@ fun RepositoryScreen(screen: Screen.Repository) {
                             }
                             else -> IconAction(Icons.Filled.Delete, "Uninstall") { PluginManager.uninstall(p.internalName); PluginManager.bumpVersion() }
                         }
+                      }
                     }
                 }
             }

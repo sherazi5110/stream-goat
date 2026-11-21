@@ -1,5 +1,6 @@
 package io.github.sherazi5110.cloudstream.ui
 
+import androidx.compose.foundation.horizontalScroll
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.PictureInPictureAlt
@@ -109,7 +111,7 @@ import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
 
-private enum class Sheet(val title: String) { SOURCES("Sources"), SUBTITLES("Subtitles"), ONLINE("Online subtitles"), TRANSLATE("Translate subtitles"), AUDIO("Audio"), SPEED("Speed"), ZOOM("Zoom"), QUALITY("Quality"),
+private enum class Sheet(val title: String) { SOURCES("Sources"), SUBTITLES("Subtitles"), ONLINE("Online subtitles"), TRANSLATE("Translate subtitles"), AUDIO("Audio"), BOOST("Volume boost"), SPEED("Speed"), ZOOM("Zoom"), QUALITY("Quality"),
     SUB_SYNC("Sync subtitles"), AUDIO_SYNC("Sync audio"), SUB_STYLE("Subtitle style") }
 
 fun Context.findActivity(): Activity? = when (this) {
@@ -163,6 +165,7 @@ fun PlayerScreen(screen: Screen.Player) {
         insets?.hide(WindowInsetsCompat.Type.systemBars())
         val orientation = activity?.requestedOrientation
         view.keepScreenOn = true
+        io.github.sherazi5110.cloudstream.Music.pauseForVideo()
         onDispose {
             insets?.show(WindowInsetsCompat.Type.systemBars())
             if (!isTv) activity?.requestedOrientation = orientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -248,6 +251,17 @@ fun PlayerScreen(screen: Screen.Player) {
             // TV with a mouse: a click on the picture shows the controls (and settings buttons), another hides them.
             else Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { controls = !controls; poke++ } })
             if (c.buffering && c.error == null) Spinner(Modifier.fillMaxSize())
+            if (c.slowWarning && c.error == null) {
+                Row(Modifier.align(Alignment.TopCenter).padding(top = 72.dp).widthIn(max = 640.dp)
+                    .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Your internet seems too slow for this video. A lower quality or another source will play smoother.",
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    if (c.variants.size > 1) PillButton("Lower quality", null, primary = false, compact = true) { c.slowWarning = false; sheet = Sheet.QUALITY }
+                    PillButton("Sources", null, primary = false, compact = true) { c.slowWarning = false; sheet = Sheet.SOURCES }
+                    IconAction(androidx.compose.material.icons.Icons.Filled.Clear, "Dismiss") { c.slowWarning = false }
+                }
+            }
             c.error?.let {
                 Column(Modifier.align(Alignment.Center).widthIn(max = 560.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(10.dp)).padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
@@ -266,7 +280,7 @@ fun PlayerScreen(screen: Screen.Player) {
                     RoundIcon(Icons.Filled.Lock, "Unlock", Modifier.padding(24.dp)) { locked = false; poke++ }
                 }
             } else AnimatedVisibility(controls && !inPip(), enter = fadeIn(), exit = fadeOut()) {
-                Controls(c, onSheet = { sheet = it }, onLock = { locked = true; poke++ }, poke = { poke++ })
+                Controls(c, sheetOpen = sheet != null, onSheet = { sheet = it }, onLock = { locked = true; poke++ }, poke = { poke++ })
             }
             val seg = c.activeSegment
             if (countdownLeft > 0) {
@@ -386,9 +400,14 @@ private fun RoundIcon(icon: ImageVector, label: String, modifier: Modifier = Mod
 }
 
 @Composable
-private fun Controls(c: PlayerController, onSheet: (Sheet) -> Unit, onLock: () -> Unit, poke: () -> Unit) {
+private fun Controls(c: PlayerController, sheetOpen: Boolean = false, onSheet: (Sheet) -> Unit, onLock: () -> Unit, poke: () -> Unit) {
     val playFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { if (isTv) runCatching { playFocus.requestFocus() } }
+    val inputMode = androidx.compose.ui.platform.LocalInputModeManager.current.inputMode
+    // When the controls appear, and again when a panel (Audio, Subtitles, Sources…) closes, the remote's selection
+    // goes to Play/pause instead of nowhere (it used to bounce to the back button or need an extra OK).
+    LaunchedEffect(sheetOpen) {
+        if (!sheetOpen && (isTv || inputMode == androidx.compose.ui.input.InputMode.Keyboard)) { delay(80); runCatching { playFocus.requestFocus() } }
+    }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(15_000) } }
     val timeFormat = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
@@ -399,7 +418,9 @@ private fun Controls(c: PlayerController, onSheet: (Sheet) -> Unit, onLock: () -
             RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back") { Nav.back() }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(c.response.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val sub = if (c.playables.size > 1) c.playable.label else c.current?.name
+                val sub = (if (c.playables.size > 1) c.playable.label else c.current?.name)?.let { s ->
+                    c.measured?.let { m -> "$s · actual $m" + if (m.substringBefore('×').toIntOrNull()?.let { it >= 3200 } == true) " (4K)" else "" } ?: s
+                }
                 sub?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1) }
             }
             // Report a glitch: a picture of the player as it is now, the source playing and the last steps.
@@ -464,7 +485,12 @@ private fun Controls(c: PlayerController, onSheet: (Sheet) -> Unit, onLock: () -
                 )
                 Text(clock(c.length / 1000.0), style = MaterialTheme.typography.titleSmall)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // On a phone held upright the buttons don't all fit: the row scrolls sideways instead of squeezing the last
+            // one into a column of letters (issue #53). Wide screens spread them out as before.
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val narrow = maxWidth < 640.dp
+            Row(Modifier.fillMaxWidth().then(if (narrow) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier),
+                horizontalArrangement = if (narrow) Arrangement.spacedBy(2.dp) else Arrangement.SpaceBetween) {
                 BarButton(Icons.AutoMirrored.Filled.List, "Sources") { onSheet(Sheet.SOURCES) }
                 BarButton(Icons.Filled.ClosedCaption, "Subtitles") { onSheet(Sheet.SUBTITLES) }
                 BarButton(Icons.Filled.Translate, "Audio") { onSheet(Sheet.AUDIO) }
@@ -475,6 +501,7 @@ private fun Controls(c: PlayerController, onSheet: (Sheet) -> Unit, onLock: () -
                 BarButton(Icons.Filled.AspectRatio, c.zoom.label) { c.cycleZoom(); poke() }
                 c.next?.let { next -> BarButton(Icons.Filled.SkipNext, "Next episode") { Nav.replace(Screen.Player(c.api, c.response, next)) } }
             }
+            }
         }
     }
 }
@@ -484,7 +511,7 @@ private fun BarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Row(Modifier.card(RoundedCornerShape(8.dp), onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
     }
 }
 
@@ -578,6 +605,14 @@ private fun SheetPanel(sheet: Sheet, c: PlayerController, modifier: Modifier, on
                 }
             }
             Sheet.AUDIO -> c.audioTracks().filter { it.id != -1 }.map { t -> Option(t.name, null, t.id == c.audioTrack()) { c.setAudio(t.id); onClose() } } +
+                Option("Volume boost: ${c.boost}%", "Louder than the device's maximum, for quiet streams", c.boost > 100) { onOpen(Sheet.BOOST) } +
+                Option(if (Settings.passthrough) "Surround passthrough (5.1/7.1): On" else "Surround passthrough (5.1/7.1): Off",
+                    "On: Dolby and DTS go as they are to your receiver or soundbar. Off: the app plays 5.1 itself (all channels on TVs and receivers, mixed to stereo on phones)",
+                    Settings.passthrough) {
+                    Settings.passthrough = !Settings.passthrough
+                    c.reopen()
+                    onClose()
+                } +
                 Option("Sync audio", if (c.audioDelay == 0L) "Earlier or later, to match the lips" else delayText(c.audioDelay), false) { onOpen(Sheet.AUDIO_SYNC) } +
                 Option(if (Settings.levelAudio) "Even out loud and quiet sounds: On" else "Even out loud and quiet sounds: Off",
                     "Quieter music and explosions, clearer voices (good on TVs)", Settings.levelAudio) {
@@ -585,6 +620,7 @@ private fun SheetPanel(sheet: Sheet, c: PlayerController, modifier: Modifier, on
                     c.reopen()
                     onClose()
                 }
+            Sheet.BOOST -> listOf(100, 125, 150, 175, 200).map { v -> Option("$v%", if (v == 100) "Normal" else "Louder (may distort)", v == c.boost) { c.changeBoost(v); onClose() } }
             Sheet.SPEED -> listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f).map { r -> Option("$r×", if (r == 1f) "Normal" else null, r == c.speed) { c.setRate(r); onClose() } }
             Sheet.ZOOM -> Zoom.entries.map { z -> Option(z.label, null, z == c.zoom) { c.setZoomMode(z); onClose() } }
             Sheet.SUB_SYNC, Sheet.AUDIO_SYNC, Sheet.SUB_STYLE -> emptyList()

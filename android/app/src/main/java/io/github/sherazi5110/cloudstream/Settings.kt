@@ -111,6 +111,11 @@ object Settings {
         get() = string("check_updates", "true") == "true"
         set(v) = put("check_updates", v)
 
+    /** Text size across the app (issue #55): 0.85 small … 1.3 largest, on top of the phone's own font size. */
+    var textScale: Float
+        get() = string("text_scale", "1.0").toFloatOrNull() ?: 1f
+        set(v) = put("text_scale", v.toString())
+
     /** Home: rotate the featured banner through the first catalog's top titles. */
     var heroSlider: Boolean
         get() = string("hero_slider", "true") == "true"
@@ -202,6 +207,41 @@ object Settings {
         get() = string("player_orientation", "LANDSCAPE")
         set(v) = put("player_orientation", v)
 
+    /** Lower-resolution posters and pictures (null = automatic: on for old or low-memory devices). */
+    var lowResImages: Boolean?
+        get() = string("low_res_images", "").toBooleanStrictOrNull()
+        set(v) = put("low_res_images", v?.toString() ?: "")
+
+    /** How much storage the picture cache may use, in MB (0 = no cache on storage). Applies after a restart. */
+    var imageCacheMb: Int
+        get() = string("image_cache_mb", "250").toIntOrNull() ?: 250
+        set(v) = put("image_cache_mb", v.toString())
+
+    /** How far ahead the player loads, in seconds (HLS streams). More = fewer pauses on slow internet, more memory. */
+    var bufferAheadSec: Int
+        get() = string("buffer_ahead_s", "60").toIntOrNull()?.coerceIn(10, 600) ?: 60
+        set(v) = put("buffer_ahead_s", v.toString())
+
+    /** Most memory the player's download buffer may use, in MB (single-file videos). 0 = automatic. */
+    var bufferMemoryMb: Int
+        get() = string("buffer_memory_mb", "0").toIntOrNull()?.coerceIn(0, 1024) ?: 0
+        set(v) = put("buffer_memory_mb", v.toString())
+
+    /** How much to load before a video starts or resumes after a jump, in milliseconds. */
+    var startBufferMs: Int
+        get() = string("start_buffer_ms", "1500").toIntOrNull()?.coerceIn(300, 20_000) ?: 1500
+        set(v) = put("start_buffer_ms", v.toString())
+
+    /** Volume boost in percent (100 = normal, up to 200): for quiet streams and weak speakers. */
+    var volumeBoost: Int
+        get() = string("volume_boost", "100").toIntOrNull()?.coerceIn(100, 200) ?: 100
+        set(v) = put("volume_boost", v.coerceIn(100, 200).toString())
+
+    /** Send Dolby/DTS 5.1 and 7.1 sound as is to an AV receiver or soundbar (HDMI/optical passthrough). */
+    var passthrough: Boolean
+        get() = string("audio_passthrough", "false").toBoolean()
+        set(v) = put("audio_passthrough", v.toString())
+
     /** Even out loud and quiet sounds (libVLC's compressor): quieter explosions and music, clearer voices. */
     var levelAudio: Boolean
         get() = string("level_audio", "false").toBoolean()
@@ -213,7 +253,7 @@ object Settings {
      */
     var showNsfw: Boolean
         get() = string("show_nsfw", "false") == "true"
-        set(v) = put("show_nsfw", v)
+        set(v) { put("show_nsfw", v); ContentFilter.syncAdult() }
 
     /** "auto" (detect Android TV), "phone" or "tv": for TV boxes that report themselves wrongly. App-wide. */
     var layout: String

@@ -1,5 +1,8 @@
 package io.github.sherazi5110.cloudstream.ui
 
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -385,8 +388,18 @@ private fun ProfileEditor(initial: Profile, isNew: Boolean, onClose: () -> Unit)
             ChoiceChips(listOf(0, 7, 12, 16), { if (it == 0) "All ages" else "$it+" }, { it == filter.maxAge }) { filter = filter.copy(maxAge = it) }
             Text("Blocked words", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             var words by remember { mutableStateOf(filter.blockedWords.joinToString(", ")) }
+            // One line, and Down / the keyboard's Done move on: on a TV remote a multi-line box kept the focus, so Save
+            // couldn't be reached (issue #65).
+            val focus = androidx.compose.ui.platform.LocalFocusManager.current
             OutlinedTextField(words, { words = it; filter = filter.copy(blockedWords = it.split(',').map(String::trim).filter(String::isNotBlank)) },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) }),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).onPreviewKeyEvent { e ->
+                    if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && e.key == androidx.compose.ui.input.key.Key.DirectionDown) {
+                        focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+                    } else false
+                })
         }
         if (lastGrownUp) Text("This is the last grown-up profile, so it can't become a kids profile.", style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 8.dp))

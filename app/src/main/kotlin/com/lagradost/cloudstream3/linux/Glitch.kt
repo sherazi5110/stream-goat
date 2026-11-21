@@ -140,7 +140,7 @@ object Glitch {
 
     fun header(): String = "Stream Goat ${com.lagradost.cloudstream3.linux.ui.AppInfo.VERSION} on ${Os.name} " +
         "${System.getProperty("os.version")} (${System.getProperty("os.arch")}), Java ${System.getProperty("java.version")}, " +
-        "libVLC ${runCatching { com.lagradost.cloudstream3.linux.ui.Vlc.version }.getOrNull() ?: "?"}"
+        "libVLC ${if (com.lagradost.cloudstream3.linux.ui.Vlc.isLoaded) runCatching { com.lagradost.cloudstream3.linux.ui.Vlc.version }.getOrNull() ?: "?" else "not started yet"}"
 
     private val tokenish = Regex("""(?i)(access_token|refresh_token|id_token|client_secret|api[_-]?key|password|token)(["'=:\s]+)[^\s"'&,]+""")
     private val auth = Regex("""(?i)(authorization:\s*\w+\s+)\S+""")

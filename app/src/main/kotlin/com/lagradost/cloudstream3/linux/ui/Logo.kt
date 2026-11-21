@@ -117,9 +117,13 @@ class Waves : Pane() {
     private var last = 0L
     var fade = 0.0
     private val timer = object : AnimationTimer() {
+        private var drawn = 0L
         override fun handle(now: Long) {
             if (last != 0L) t += (now - last) / 1e9 * (2 * PI / 9.0)
             last = now
+            // About 40 pictures a second is smooth for slow-moving lines and halves the work on 120/144 Hz screens.
+            if (now - drawn < 24_000_000L) return
+            drawn = now
             draw()
         }
     }
@@ -141,8 +145,9 @@ class Waves : Pane() {
         if (w <= 0 || h <= 0) return
         val accent = runCatching { Color.web(Theme.accent) }.getOrDefault(Color.web(Logo.DEFAULT_ACCENT))
         val second = Brand.companion(accent)
-        val lines = 26
-        val step = maxOf(8.0, w / 90)
+        // Light enough for slow computers: fewer lines and points (it looks the same at this speed).
+        val lines = 16
+        val step = maxOf(12.0, w / 48)
         g.lineCap = StrokeLineCap.ROUND
         for (i in 0 until lines) {
             val f = i / (lines - 1.0)
@@ -160,7 +165,7 @@ class Waves : Pane() {
                 if (first) { g.moveTo(x, y); first = false } else g.lineTo(x, y)
                 x += step
             }
-            g.stroke = Color(c.red, c.green, c.blue, 0.18 * fade); g.lineWidth = 8.0; g.stroke()
+            if (i % 2 == 0) { g.stroke = Color(c.red, c.green, c.blue, 0.16 * fade); g.lineWidth = 8.0; g.stroke() }
             g.stroke = Color(bright.red, bright.green, bright.blue, 0.95 * fade); g.lineWidth = 2.2; g.stroke()
         }
     }

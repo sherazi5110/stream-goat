@@ -1,5 +1,11 @@
 package io.github.sherazi5110.cloudstream.ui
 
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Sync
@@ -82,8 +88,10 @@ enum class Section(val title: String, val text: String, val icon: ImageVector) {
     PLAYER("Player", "Sources, quality, subtitles, audio", Icons.Filled.PlayCircle),
     LIVETV("Live TV", "M3U playlists, Xtream Codes, guides", Icons.Filled.LiveTv),
     WETRAKR("WeTrakr sync", "Mark what you watch on WeTrakr", Icons.Filled.Sync),
+    HIDDEN("Hidden content", "Titles you hid, with Restore", Icons.Filled.VisibilityOff),
     METADATA("Metadata & integrations", "TMDB, IMDb ratings, AniList", Icons.Filled.Star),
     NETWORK("Network", "DNS over HTTPS, cookies", Icons.Filled.Public),
+    LOGS("App logs", "What the app recorded, to copy or share", Icons.Filled.BugReport),
     ABOUT("About", "Version, source code", Icons.Filled.Info),
 }
 
@@ -142,12 +150,14 @@ private fun SectionContent(s: Section) {
     when (s) {
         Section.EXTENSIONS -> Unit
         Section.PROFILES -> ProfilesSection()
+        Section.HIDDEN -> HiddenTitlesSection()
         Section.APPEARANCE -> AppearanceSection()
         Section.PLAYER -> PlayerSection()
         Section.LIVETV -> LiveTvSection()
         Section.WETRAKR -> WeTrakrSection()
         Section.METADATA -> MetadataSection()
         Section.NETWORK -> NetworkSection()
+        Section.LOGS -> AppLogsSection()
         Section.ABOUT -> AboutSection()
         Section.PROVIDERS -> ProvidersSection()
         Section.GENERAL -> GeneralSection()
@@ -242,9 +252,25 @@ private fun AppearanceSection() {
     Hint("Phone/TV changes how the app reacts to touch and the remote; it applies when the app restarts. Landscape screens always get the side rail.")
     Heading("Home")
     var slider by remember { mutableStateOf(Settings.heroSlider) }
+    Heading("Text size")
+    ChoiceChips(listOf(0.85f, 1f, 1.15f, 1.3f), { when (it) { 0.85f -> "Small"; 1f -> "Default"; 1.15f -> "Large"; else -> "Largest" } },
+        { it == TextSize.scale }) { TextSize.scale = it; Settings.textScale = it }
     SwitchRow("Banner slides through the top titles", null, slider) { slider = it; Settings.heroSlider = it }
     var spoiler by remember { mutableStateOf(Settings.antiSpoiler) }
     SwitchRow("Anti-spoiler", "Hide pictures and descriptions of episodes you haven't watched.", spoiler) { spoiler = it; Settings.antiSpoiler = it }
+    Heading("Pictures")
+    var lowRes by remember { mutableStateOf(Settings.lowResImages) }
+    ChoiceChips(listOf<Boolean?>(null, true, false), { when (it) { null -> "Automatic"; true -> "Low resolution"; false -> "Full resolution" } }, { it == lowRes }) {
+        lowRes = it; Settings.lowResImages = it; io.github.sherazi5110.cloudstream.Images.clearCache()
+    }
+    Hint("Low resolution loads smaller posters and backdrops and keeps them in less memory: smoother on old or low-memory phones and TVs, and less data." +
+        if (io.github.sherazi5110.cloudstream.Images.lowMemoryDevice) " Automatic uses it on this device." else " Automatic uses it only on low-memory devices.")
+    var cacheMb by remember { mutableStateOf(Settings.imageCacheMb) }
+    Text("Picture cache on storage", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+    ChoiceChips(listOf(0, 100, 250, 500, 1000), { if (it == 0) "None" else if (it >= 1000) "1 GB" else "$it MB" }, { it == cacheMb }) {
+        cacheMb = it; Settings.imageCacheMb = it; App.toast("Applies when the app restarts")
+    }
+    PillButton("Clear picture cache", null, primary = false, compact = true) { io.github.sherazi5110.cloudstream.Images.clearCache(); App.toast("Picture cache cleared") }
 }
 
 @Composable
@@ -254,6 +280,25 @@ private fun PlayerSection() {
     ChoiceChips(listOf(true, false), { if (it) "Start the best source automatically" else "Let me choose the source" }, { it == autoPlay }) {
         autoPlay = it; Settings.autoPlay = it
     }
+    Heading("Buffering")
+    var start by remember { mutableStateOf(Settings.startBufferMs) }
+    Text("Load before playing (and after a jump)", style = MaterialTheme.typography.bodyMedium)
+    ChoiceChips(listOf(1000, 1500, 3000, 5000, 10000), { if (it < 1500) "1 s (fastest start)" else "${it / 1000.0}".removeSuffix(".0") + " s" }, { it == start }) {
+        start = it; Settings.startBufferMs = it
+    }
+    var ahead by remember { mutableStateOf(Settings.bufferAheadSec) }
+    Text("Keep loading ahead", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+    ChoiceChips(listOf(30, 60, 180, 300, 600), { if (it < 60) "$it s" else "${it / 60} min" }, { it == ahead }) {
+        ahead = it; Settings.bufferAheadSec = it
+    }
+    var mem by remember { mutableStateOf(Settings.bufferMemoryMb) }
+    Text("Most memory for the buffer", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+    ChoiceChips(listOf(0, 32, 64, 128, 256, 512), { if (it == 0) "Automatic" else "$it MB" }, { it == mem }) {
+        mem = it; Settings.bufferMemoryMb = it
+    }
+    Hint("On slow internet, load more ahead (3 or 5 minutes) and start a little later: the video pauses less. On an old or " +
+        "low-memory device keep the memory small; the time ahead is cut to what fits (a 4K stream takes about 3 MB a second). " +
+        "If a video keeps stopping to load, the player suggests a lower quality or another source.")
     Hint(if (autoPlay) "The best source (closest to your preferred quality) starts by itself; Sources in the player lists the others."
         else "The sources list opens, with a search box and language and quality filters: pick the one you want.")
     Heading("Playback")
@@ -391,6 +436,10 @@ private fun LiveTvSection() {
         if (busy) Spinner(Modifier.padding(start = 12.dp).size(28.dp))
     }
     if (kind == LiveTv.Kind.M3U) Hint("Or choose a playlist file (.m3u, .m3u8) saved on this device.")
+    // No typing with the remote: scan the QR code with a phone and paste the playlist link there.
+    PillButton("Add from phone (scan a QR code)", Icons.Filled.PhoneAndroid, Modifier.padding(top = 10.dp), primary = false, compact = true) {
+        Nav.open(Screen.AddFromPhone)
+    }
     if (kind == LiveTv.Kind.M3U && LiveTv.isIptvOrgIndex(url)) Hint("That's iptv-org's whole list: 10,000+ channels from every country, and many play only in " +
         "their own country or have stopped. Live TV opens on your country's channels from it, or add just one country below (smaller and quicker).")
     // iptv-org's free channels, one country at a time (its whole list is too big and mostly region-locked elsewhere).
@@ -618,6 +667,16 @@ private fun WeTrakrSection() {
             SwitchRow("Show what I'm watching", "WeTrakr shows the title as playing, with its progress. Off: titles are only marked watched when you finish them.", share) {
                 share = it; io.github.sherazi5110.cloudstream.WeTrakr.shareNowPlaying = it
             }
+            val syncScope = rememberCoroutineScope()
+            var syncing by remember { mutableStateOf(false) }
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Two-way sync: what you watch in other apps on WeTrakr (and on the website) shows as watched here, " +
+                    "and what you mark watched here is sent there. Checked every 30 minutes and when you open a title.",
+                    style = MaterialTheme.typography.bodySmall, color = Palette.muted, modifier = Modifier.weight(1f))
+                PillButton(if (syncing) "Syncing…" else "Sync now", null, primary = false, compact = true) {
+                    if (!syncing) { syncing = true; syncScope.launch { runCatching { io.github.sherazi5110.cloudstream.WeTrakrSync.pull(force = true) }; syncing = false; App.toast("WeTrakr synced") } }
+                }
+            }
         }
         code != null -> {
             val c = code!!
@@ -652,3 +711,29 @@ private fun WeTrakrSection() {
     }
     status?.let { Hint(it) }
 }
+
+
+/** Titles hidden with long-press → Hide (issue #64), each with Restore, and Restore all. */
+@Composable
+private fun HiddenTitlesSection() {
+    val items = io.github.sherazi5110.cloudstream.Hidden.items
+    Heading("Hidden titles")
+    if (items.isEmpty()) {
+        Text("None. Long-press a poster (or hold OK on a TV remote) and choose Hide to keep a title out of Home, catalogs and search.",
+            style = MaterialTheme.typography.bodySmall, color = Palette.muted)
+        return
+    }
+    items.toList().forEach { h ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).background(Palette.surface, RoundedCornerShape(10.dp)).padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            NetImage(h.poster, Modifier.width(36.dp).aspectRatio(2f / 3f))
+            Text(h.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, modifier = Modifier.padding(start = 12.dp).weight(1f))
+            PillButton("Restore", null, primary = false, compact = true) { io.github.sherazi5110.cloudstream.Hidden.restore(h.url) }
+        }
+    }
+    PillButton("Restore all (${items.size})", null, Modifier.padding(top = 8.dp), primary = false, compact = true) {
+        io.github.sherazi5110.cloudstream.Hidden.restoreAll()
+    }
+}
+
+

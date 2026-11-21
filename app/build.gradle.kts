@@ -19,7 +19,7 @@ dependencies {
     implementation("org.ow2.asm:asm-tree:9.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-javafx:1.11.0")
     // NewPipe Extractor, which the official app ships: extensions such as YoutubeProvider (official repository) use it.
-    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
     // org.xmlpull.v1 is part of Android; extensions' settings screens reference it (42 of 587 scanned).
     implementation("xmlpull:xmlpull:1.1.3.1")
     // JavaFX 21 LTS (runs on the Java 21 Ubuntu ships); GPU-accelerated, CSS-styled UI.

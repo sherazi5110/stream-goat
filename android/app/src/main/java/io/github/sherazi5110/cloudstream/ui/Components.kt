@@ -1,5 +1,8 @@
 package io.github.sherazi5110.cloudstream.ui
 
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.animation.core.animateFloatAsState
@@ -132,7 +135,14 @@ internal val RevealScroll = object : androidx.compose.foundation.gestures.BringI
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvRowScroll(content: @Composable () -> Unit) {
-    if (isTv) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides RevealScroll, content = content)
+    if (isTv) androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides RevealScroll) {
+        // Right on the last card stays put (it used to jump to the profile button at the far side of the screen).
+        androidx.compose.foundation.layout.Box(Modifier
+            .focusProperties { onExit = { if (requestedFocusDirection == androidx.compose.ui.focus.FocusDirection.Right) cancelFocusChange() } }
+            // Coming back to a row (Up/Down from the next row) returns to the card that was selected there, instead
+            // of whichever card happens to be nearest on screen.
+            .focusRestorer()) { content() }
+    }
     else content()
 }
 
@@ -153,7 +163,7 @@ fun NetImage(
         return
     }
     val request = remember(url, headers) {
-        ImageRequest.Builder(context).data(url).crossfade(true).apply {
+        ImageRequest.Builder(context).data(io.github.sherazi5110.cloudstream.Images.sized(url)).crossfade(!isTv).apply {
             if (!headers.isNullOrEmpty()) httpHeaders(NetworkHeaders.Builder().apply { headers.forEach { (k, v) -> set(k, v) } }.build())
         }.build()
     }
@@ -187,11 +197,21 @@ fun PosterCard(
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
+    // Hidden titles (long-press → Hide) don't show anywhere a poster is listed.
+    if (io.github.sherazi5110.cloudstream.Hidden.isHidden(item.url)) return
+    var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Column(modifier.width(width)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(2f / 3f)
-                .card(onFocus = onFocus, onLongClick = onLongClick, selectFirst = true, onClick = onClick)
+                .card(onFocus = onFocus, onLongClick = onLongClick ?: { menu = true }, selectFirst = true, onClick = onClick)
         ) {
+            androidx.compose.material3.DropdownMenu(menu, { menu = false }) {
+                androidx.compose.material3.DropdownMenuItem(text = { Text("Hide this title") }, onClick = {
+                    menu = false
+                    io.github.sherazi5110.cloudstream.Hidden.hide(item)
+                    io.github.sherazi5110.cloudstream.App.toast("Hidden. Restore it in Settings → Profiles → Hidden titles")
+                })
+            }
             NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders)
             item.scoreText()?.let { ScoreBadge(it, Modifier.align(Alignment.TopStart).padding(6.dp)) }
             PosterRating(item, Modifier.align(Alignment.BottomStart).padding(6.dp))

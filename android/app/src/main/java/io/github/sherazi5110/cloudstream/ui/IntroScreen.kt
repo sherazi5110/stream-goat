@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -49,6 +50,9 @@ fun IntroScreen(onDone: () -> Unit) {
     // It must never hold the app up.
     LaunchedEffect(Unit) { delay(5000); done() }
     LaunchedEffect(Unit) {
+        // Start once the first frames are on screen: the app is still busy starting up before that, and an animation
+        // begun then skips its first part (the stutter at the start).
+        repeat(3) { androidx.compose.runtime.withFrameNanos { } }
         coroutineScope {
             listOf(
                 async { waves.animateTo(1f, tween(900)) },
@@ -67,9 +71,13 @@ fun IntroScreen(onDone: () -> Unit) {
     ) {
         Waves(Modifier.fillMaxSize(), accent, waves.value)
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            // The glow is a plain gradient drawn once (a coloured shadow on a moving layer was redrawn every frame).
             Box(Modifier.size(150.dp).graphicsLayer {
                     alpha = logo.value; val s = 0.82f + 0.18f * logo.value; scaleX = s; scaleY = s; translationY = 40f * (1 - logo.value)
-                }.shadow(40.dp, RoundedCornerShape(36.dp), ambientColor = accent, spotColor = accent),
+                }.drawBehind {
+                    drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(accent.copy(alpha = 0.45f), Color.Transparent),
+                        center, size.minDimension * 0.85f), size.minDimension * 0.85f)
+                },
                 contentAlignment = Alignment.Center) { Logo(150.dp) }
             Column(Modifier.graphicsLayer { alpha = words.value; translationY = 16f * (1 - words.value) }, horizontalAlignment = Alignment.CenterHorizontally) {
                 Brand.word?.let { Image(it, "stream goat", Modifier.width(230.dp), colorFilter = ColorFilter.tint(Color.White)) }

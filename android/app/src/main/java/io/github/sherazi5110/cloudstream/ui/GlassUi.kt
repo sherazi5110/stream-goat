@@ -36,7 +36,9 @@ object Glass {
     val LocalHaze = staticCompositionLocalOf<HazeState?> { null }
 
     /** Real blur needs Android 12 (RenderEffect); older devices get a darker tint instead. */
-    val canBlur: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    // Live blur costs a lot per frame on TV boxes and sticks: TVs get the solid tinted glass instead, so remote
+    // scrolling stays smooth.
+    val canBlur: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !io.github.sherazi5110.cloudstream.App.isTv
 
     /** Glass tint over the blur: deep ink, strong enough for white text over any poster. */
     val tint: Color get() = Color(0xFF120E24).copy(alpha = if (canBlur) 0.58f else 0.90f)
@@ -124,7 +126,7 @@ fun DialogGlass() {
     if (!Palette.isGlass) return
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: return
     SideEffect {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Glass.canBlur) {
             window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             window.attributes = window.attributes.apply { blurBehindRadius = 48 }
         }

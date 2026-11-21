@@ -31,14 +31,14 @@
 <body>
 <main>
   <h1>🐐 Send to Stream Goat</h1>
-  <p class="sub">Add a Stremio add-on or a CloudStream repository to your TV without typing on the remote.</p>
+  <p class="sub">Add a Stremio add-on, a CloudStream repository or a Live TV playlist to your TV without typing on the remote.</p>
 
   <label for="code">Code shown on the TV</label>
   <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="4" placeholder="0000">
 
   <label for="text">Link(s)</label>
   <textarea id="text" autocapitalize="off" autocorrect="off" spellcheck="false"
-    placeholder="https://…/manifest.json&#10;stremio://…&#10;https://…/repo.json&#10;cloudstreamrepo://…&#10;or a repository shortcode"></textarea>
+    placeholder="https://…/manifest.json&#10;stremio://…&#10;https://…/repo.json&#10;cloudstreamrepo://…&#10;or a repository shortcode&#10;https://…/playlist.m3u (Live TV)"></textarea>
   <div class="hint">
     Stremio add-ons: the link ending in <b>manifest.json</b> (or a stremio:// link).<br>
     CloudStream repositories: the repository's link (…/repo.json), a cloudstreamrepo:// link, or its shortcode.

@@ -69,6 +69,8 @@ class DesktopApp : Application() {
             exitProcess(0)
         }
         stage.show()
+        // VLC starts in the background now, so the first video or Settings doesn't freeze the window (issue #68).
+        Vlc.warmUp()
         val startMs = java.lang.management.ManagementFactory.getRuntimeMXBean().startTime
         System.err.println("I/app: window shown ${System.currentTimeMillis() - startMs} ms after launch")
         window.startup(repoLink)

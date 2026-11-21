@@ -125,7 +125,9 @@ object PhoneLink {
                     Kind.REPO -> addRepo(item)
                     Kind.PLAYLIST -> LiveTv.add(LiveTv.Kind.M3U, item.text).let { (s, n) -> item.copy(message = "${s.name}: $n channels, in Live TV") }
                     // Not obvious from the link: a CloudStream repository's JSON, else a Stremio add-on.
-                    Kind.UNKNOWN -> runCatching { addRepo(item) }.getOrElse { addStremio(item) }
+                    Kind.UNKNOWN -> runCatching { addRepo(item) }.recoverCatching { addStremio(item) }.getOrElse {
+                        LiveTv.add(LiveTv.Kind.M3U, item.text).let { (s, n) -> item.copy(kind = Kind.PLAYLIST, message = "${s.name}: $n channels, in Live TV") }
+                    }
                 }
             }
         }

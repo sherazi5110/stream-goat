@@ -121,6 +121,7 @@ suspend fun cli(args: List<String>): Int {
             val apis = args.option("--provider")?.let { listOf(requireProvider(it)) } ?: Engine.allProviders()
             Engine.search(pos.drop(1).joinToString(" "), apis).collect { batch ->
                 batch.results.forEach { r -> println("[${batch.api.name}] ${r.name} (${r.type ?: "?"})\t${r.url}") }
+                batch.error?.let { System.err.println("[${batch.api.name}] failed: ${it.javaClass.simpleName}: ${it.message}") }
             }
         }
         "info" -> {

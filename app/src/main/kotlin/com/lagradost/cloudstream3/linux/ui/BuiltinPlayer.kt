@@ -137,6 +137,57 @@ class BuiltinPlayer(
     private val top: Node
     private val bottom: Node
     private val menu = PlayerMenu()
+
+    // ---------- qualities inside one source (an HLS link with 4K / 1080p / 720p… in it) ----------
+    private var master: com.lagradost.cloudstream3.linux.HlsVariants.Master? = null
+    private var pinned: com.lagradost.cloudstream3.linux.HlsVariants.Variant? = null
+    private val qualityButton: javafx.scene.Node = iconButton(Icons.TUNE, "Quality (Q)") { showQuality() }.apply { isVisible = false; isManaged = false }
+
+    /** Reads the source's master playlist in the background; the Quality button shows when it has 2+ qualities. */
+    private fun findQualities(link: ExtractorLink) {
+        master = null; pinned = null
+        qualityButton.isVisible = false; qualityButton.isManaged = false
+        if (!(link.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8 || link.url.substringBefore('?').endsWith(".m3u8"))) return
+        Thread({
+            val m = runCatching {
+                val req = okhttp3.Request.Builder().url(link.url).apply {
+                    link.getAllHeaders().forEach { (k, v) -> header(k, v) }
+                    if (link.getAllHeaders().keys.none { it.equals("user-agent", true) }) header("User-Agent", USER_AGENT)
+                }.build()
+                com.lagradost.cloudstream3.app.baseClient.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) null else com.lagradost.cloudstream3.linux.HlsVariants.parse(r.body.string().take(512 * 1024), r.request.url.toString())
+                }
+            }.getOrNull()
+            javafx.application.Platform.runLater {
+                if (current === link && m != null) { master = m; qualityButton.isVisible = true; qualityButton.isManaged = true }
+            }
+        }, "hls-qualities").apply { isDaemon = true }.start()
+    }
+
+    private fun showQuality() {
+        val m = master ?: return
+        menu.open("quality", "Quality", listOf(PlayerMenu.Item("Auto (adapts to your connection)", active = pinned == null) { setQuality(null); menu.close() }) +
+            m.variants.map { v -> PlayerMenu.Item(v.label + (v.bandwidth?.let { " · ${it / 1000} kbps" } ?: ""), active = v == pinned) { setQuality(v); menu.close() } })
+    }
+
+    /** Plays the same source at one quality (or back to Auto), from the same moment. */
+    private fun setQuality(v: com.lagradost.cloudstream3.linux.HlsVariants.Variant?) {
+        val m = master ?: return
+        val link = current
+        val at = position
+        pinned = v
+        if (v == null) { val keep = m; open(link, at); master = keep; pinned = null; qualityButton.isVisible = true; qualityButton.isManaged = true; return }
+        // A copy of the master with only this quality (and its audio), saved as a file VLC opens; addresses that
+        // need headers go through the local proxy.
+        val headers = link.getAllHeaders()
+        val needsProxy = headers.keys.any { !it.equals("referer", true) && !it.equals("user-agent", true) }
+        val text = com.lagradost.cloudstream3.linux.HlsVariants.single(m, v) { u -> if (needsProxy) com.lagradost.cloudstream3.linux.StreamProxy.wrap(u, headers) else u }
+        val file = java.io.File.createTempFile("quality-", ".m3u8").apply { deleteOnExit(); writeText(text) }
+        val opts = mrl(link).second.toMutableList()
+        if (at > 1000) opts += ":start-time=${at / 1000.0}"
+        sourceChip.text = "${link.name} · ${v.label}"
+        if (!player.media().play(file.toURI().toString(), *opts.toTypedArray())) onError()
+    }
     private val hideTimer = PauseTransition(Duration.seconds(2.8)).apply { setOnFinished { hideControls() } }
     private var controlsVisible = true
     private val skipButton = button("Skip intro", Icons.SKIP_NEXT, "player-skip") { skipSegment() }.apply { isVisible = false }
@@ -176,6 +227,7 @@ class BuiltinPlayer(
             iconButton(Icons.SOURCES, "Sources (S)") { showSources() },
             iconButton(Icons.SUBTITLES, "Subtitles (C)") { showSubtitles() },
             iconButton(Icons.LANGUAGE, "Audio language (A)") { showAudio() },
+            qualityButton,
             iconButton(Icons.SPEED, "Speed") { showSpeed() },
             iconButton(Icons.ASPECT, "Picture: zoom, anime enhance, HDR (Z)") { showZoom() },
             iconButton(Icons.CAMERA, "Screenshot (Shift+S)") { screenshot() },
@@ -236,6 +288,7 @@ class BuiltinPlayer(
             play()
         }
         current = link
+        findQualities(link)
         com.lagradost.cloudstream3.linux.Glitch.screen = "Player: $title (${api.name})"
         com.lagradost.cloudstream3.linux.Glitch.playing = "$title (${api.name}), source ${link.name} [${link.type}] from " +
             (runCatching { java.net.URI(link.url).host }.getOrNull() ?: "?")
@@ -272,6 +325,11 @@ class BuiltinPlayer(
             referer?.let { add(":http-referrer=$it") }
             add(":network-caching=${if (Settings.batterySaver) 3000 else 1500}")
             link.audioTracks.forEach { add(":input-slave=${it.url}") }
+        }
+        // A playlist given inline (data: address, NetMirror): VLC can't open those; the proxy serves it.
+        if (url.startsWith("data:", true)) {
+            val all = buildMap { putAll(other); put("User-Agent", ua); referer?.let { put("Referer", it) } }
+            StreamProxy.wrapData(url, all)?.let { return it to options }
         }
         val isHttp = url.startsWith("http://") || url.startsWith("https://")
         // A Live TV server with an expired (but genuine) certificate: through the local proxy, which accepts it.
@@ -336,6 +394,7 @@ class BuiltinPlayer(
 
     private inner class Events : MediaPlayerEventAdapter() {
         override fun playing(mediaPlayer: MediaPlayer) = fx {
+            com.lagradost.cloudstream3.linux.KeepAwake.on()
             // Next time (Continue Watching, Resume) this title starts with the same source.
             if (api !is com.lagradost.cloudstream3.linux.LiveApi) com.lagradost.cloudstream3.linux.LastSource.remember(api.name, response.url, current)
             channelKey?.let { com.lagradost.cloudstream3.linux.LiveTv.markWorking(it) }
@@ -350,6 +409,7 @@ class BuiltinPlayer(
         }
 
         override fun paused(mediaPlayer: MediaPlayer) = fx {
+            com.lagradost.cloudstream3.linux.KeepAwake.off()
             playing = false
             trakr?.paused(percent())
             playButton.graphic = icon(Icons.PLAY, 22.0)
@@ -387,6 +447,7 @@ class BuiltinPlayer(
         }
 
         override fun finished(mediaPlayer: MediaPlayer) = fx {
+            com.lagradost.cloudstream3.linux.KeepAwake.off()
             // VLC also says "finished" when a source fails to open or drops mid-way: only a real end
             // (close to the length) ends the episode; anything else is a failed source.
             // A late event from the source that was just replaced: the player is already opening the new one.
@@ -399,7 +460,7 @@ class BuiltinPlayer(
             } else onError()
         }
 
-        override fun error(mediaPlayer: MediaPlayer) = fx { onError() }
+        override fun error(mediaPlayer: MediaPlayer) = fx { com.lagradost.cloudstream3.linux.KeepAwake.off(); onError() }
     }
 
     private fun fx(block: () -> Unit) = Platform.runLater { if (!finished) block() }
@@ -1115,6 +1176,7 @@ class PlayerMenu : VBox(4.0) {
     }
 
     fun close() {
+        com.lagradost.cloudstream3.linux.KeepAwake.off()
         if (!isVisible) return
         isVisible = false
         kind = null

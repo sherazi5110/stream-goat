@@ -60,6 +60,7 @@ data class SearchBatch(val api: MainAPI, val results: List<SearchResponse>, val 
  * UI as each provider, section or extractor finishes, and slow ones never block fast ones.
  */
 object Engine {
+    init { ContentFilter.syncAdult() }
     private val threads = AtomicInteger()
 
     /** Extension code runs on its own pool so a misbehaving extension cannot starve the UI or IO. */
@@ -74,7 +75,7 @@ object Engine {
     fun providers(): List<MainAPI> = allProviders().filter { ContentFilter.allows(it) }
 
     /** Every loaded extension and add-on, whatever the profile. */
-    fun allProviders(): List<MainAPI> = (APIHolder.allProviders.toList() + StremioAddons.apis())
+    fun allProviders(): List<MainAPI> = (APIHolder.allProviders.withLock { APIHolder.allProviders.toList() } + StremioAddons.apis())
         .onEach { SiteOverrides.apply(it) }
         .sortedBy { it.name.lowercase() }
 

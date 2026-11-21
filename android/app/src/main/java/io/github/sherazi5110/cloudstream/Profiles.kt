@@ -58,7 +58,7 @@ object Profiles {
         return { listeners -= listener }
     }
 
-    private fun changed() = listeners.forEach { it() }
+    private fun changed() { ContentFilter.syncAdult(); listeners.forEach { it() } }
 
     fun all(): List<Profile> {
         val saved = prefs.getString("list", null)?.let { runCatching { mapper.readValue<List<Profile>>(it) }.getOrNull() }
@@ -161,6 +161,14 @@ object ContentFilter {
     /** Adult content is shown only to grown-up profiles that turned it on (Settings → Profiles). */
     val nsfwAllowed get() = !Profiles.isKids && Settings.showNsfw
 
+    /**
+     * Tells the extensions too, as the official app does (MainAPI.settingsForProvider.enableAdult): some (MovieBox,
+     * anime sites…) only return their adult titles when it's on. Called at start, on profile switch and on the switch.
+     */
+    fun syncAdult() {
+        runCatching { com.lagradost.cloudstream3.MainAPI.settingsForProvider.enableAdult = nsfwAllowed }
+    }
+
     fun allows(api: MainAPI): Boolean {
         if (TvType.NSFW in api.supportedTypes && !nsfwAllowed) return false
         // Settings → Extensions: languages and media types to show (empty = all). Stremio add-ons always show.
@@ -168,7 +176,10 @@ object ContentFilter {
             val langs = Settings.extensionLanguages
             if (langs.isNotEmpty() && (api.lang as String?)?.lowercase() !in langs) return false
             val types = Settings.mediaTypes
-            if (types.isNotEmpty() && api.supportedTypes.none { it.name in types }) return false
+            // Adult extensions follow the adult switch, not "Preferred media" (which has no adult choice): with a few
+            // types picked there, turning adult content on used to show none of them.
+            val adultOn = nsfwAllowed && TvType.NSFW in api.supportedTypes
+            if (types.isNotEmpty() && !adultOn && api.supportedTypes.none { it.name in types }) return false
         }
         val f = filter ?: return true
         return api.name in f.extensions

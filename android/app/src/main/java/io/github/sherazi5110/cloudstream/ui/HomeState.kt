@@ -34,7 +34,7 @@ class HomeState {
     var editing by mutableStateOf(false)
 
     /** Banner titles: the first few of the first row. */
-    val featured: List<SearchResponse> get() = sections.firstOrNull()?.list?.list.orEmpty().take(6)
+    val featured: List<SearchResponse> get() = sections.firstOrNull()?.list?.list.orEmpty().filterNot { io.github.sherazi5110.cloudstream.Hidden.isHidden(it.url) }.take(6)
 
     fun choose(api: MainAPI) {
         Settings.lastHomeProvider = api.name

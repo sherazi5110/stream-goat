@@ -179,6 +179,15 @@ jobs:
           name: app-image
           path: build
 
+      # When Flathub has a newer SDK, the builder updates the one baked into the container image, and on Docker's
+      # layered disk that move fails ("Invalid cross-device link"): the build failed every time an update was out.
+      # Copying the installed runtimes into the container's own writable layer first lets the update go through.
+      - name: Make the preinstalled runtimes updatable
+        run: |
+          cp -a /var/lib/flatpak /var/lib/flatpak.rw
+          rm -rf /var/lib/flatpak
+          mv /var/lib/flatpak.rw /var/lib/flatpak
+
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/flatpak/io.github.sherazi5110.CloudStreamLinux.yml

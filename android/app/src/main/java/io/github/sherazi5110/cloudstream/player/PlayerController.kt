@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -106,10 +107,17 @@ class PlayerController(
     var current by mutableStateOf<ExtractorLink?>(null)
     var started by mutableStateOf(false)
     var playing by mutableStateOf(false)
+    /** The playing video's real size, e.g. "3840×2160" (null until it's known). */
+    var measured by mutableStateOf<String?>(null)
+    /** Set after the hardware decoder stalled on this title: decode in software from then on. */
+    private var softwareDecode = false
     var buffering by mutableStateOf(true)
     var time by mutableLongStateOf(0L)
     var length by mutableLongStateOf(0L)
     var speed by mutableFloatStateOf(1f)
+    /** Volume in percent: above 100 boosts quiet streams (libVLC amplifies up to 200). */
+    var boost by mutableIntStateOf(Settings.volumeBoost)
+        private set
     var zoom by mutableStateOf(runCatching { Zoom.valueOf(Settings.playerZoom) }.getOrDefault(Zoom.FIT))
     var selectedSubtitle by mutableStateOf<String?>(null)
     var error by mutableStateOf<String?>(null)
@@ -122,6 +130,8 @@ class PlayerController(
         private set
     private val tried = mutableSetOf<String>()
     private var startAt: Long = 0
+    /** The last position that played, kept when a source fails or is switched. */
+    private var lastGoodTime: Long = 0
     private var grace: Job? = null
     private var watchdog: Job? = null
     private var saver: Job? = null
@@ -151,6 +161,21 @@ class PlayerController(
         saver = scope.launch {
             while (true) { delay(10_000); if (playing) { save(); trakr?.tick(percent()) } }
         }
+        // Some phones' hardware video decoders stall ("buffer deadlock"): the picture freezes while the player still
+        // says it's playing. If the clock stops for 8 s, reload the same source at the same place, decoded in software.
+        scope.launch {
+            var last = -1L; var still = 0
+            while (true) {
+                delay(2_000)
+                if (playing && !softwareDecode && !buffering && time > 0 && time == last) still++ else still = 0
+                last = time
+                if (still >= 4) {
+                    still = 0; softwareDecode = true
+                    App.toast("The video stalled: switching to software decoding")
+                    current?.let { play(it, lastVariantUrl) }
+                }
+            }
+        }
     }
 
     private fun listen() {
@@ -160,6 +185,23 @@ class PlayerController(
                     // Next time (Continue Watching, Resume) this title starts with the same source.
                     current?.takeIf { api !is io.github.sherazi5110.cloudstream.LiveApi }?.let { io.github.sherazi5110.cloudstream.LastSource.remember(api.name, response.url, it) }
                     playing = true; buffering = false; started = true; error = null; watchdog?.cancel()
+                    // The real picture size (extensions sometimes label a 4K file as 1080p): shown in the player and
+                    // remembered for the source list.
+                    // Read on the player's own thread: asking libVLC from the main thread while it's busy froze the
+                    // app ("isn't responding").
+                    main.postDelayed({ VlcThread.run {
+                        runCatching {
+                            val t = player.currentVideoTrack ?: return@runCatching
+                            measured = if (t.width > 0 && t.height > 0) "${t.width}×${t.height}" else null
+                            // With several qualities, Auto starts low: what plays now isn't what the source offers.
+                            // The best quality in its playlist is (and is what the source list shows).
+                            val best = variants.mapNotNull { it.height }.maxOrNull()
+                            current?.let { l ->
+                                if (best != null) io.github.sherazi5110.cloudstream.MeasuredQuality.remember(l.url, best * 16 / 9, best)
+                                else io.github.sherazi5110.cloudstream.MeasuredQuality.remember(l.url, t.width, t.height)
+                            }
+                        }
+                    } }, 1500)
                     channelKey?.let { io.github.sherazi5110.cloudstream.LiveTv.markWorking(it) }
                     trakr?.playing(percent())
                     if (!languagesApplied) { languagesApplied = true; main.postDelayed({ applyLanguages() }, 1500) }
@@ -170,8 +212,13 @@ class PlayerController(
                     }
                 }
                 MediaPlayer.Event.Paused -> { playing = false; trakr?.paused(percent()) }
-                MediaPlayer.Event.Buffering -> buffering = e.buffering < 100f
-                MediaPlayer.Event.TimeChanged -> { time = e.timeChanged; if (buffering && playing) buffering = false; updateSkip(e.timeChanged) }
+                MediaPlayer.Event.Buffering -> {
+                    val now = e.buffering < 100f
+                    // A pause to load in the middle of playing (not the start, not right after a jump).
+                    if (now && !buffering && started && android.os.SystemClock.elapsedRealtime() - lastSeekAt > 4000) stalled()
+                    buffering = now
+                }
+                MediaPlayer.Event.TimeChanged -> { time = e.timeChanged; if (e.timeChanged > 0) lastGoodTime = e.timeChanged; if (buffering && playing) buffering = false; updateSkip(e.timeChanged) }
                 MediaPlayer.Event.LengthChanged -> { length = e.lengthChanged; loadSegments() }
                 MediaPlayer.Event.EndReached -> main.post { onEndReached() }
                 MediaPlayer.Event.EncounteredError -> main.post { failover() }
@@ -312,7 +359,7 @@ class PlayerController(
                 else -> withContext(Dispatchers.IO) {
                     // The audio is separate: a master with only this quality, so it keeps its sound.
                     val headers = headersOf(link)
-                    val proxied = headers.keys.any { !it.equals("Referer", true) && !it.equals("User-Agent", true) }
+                    val proxied = true // through the local proxy, like every HLS source (see play())
                     val text = HlsVariants.single(m, v) { if (proxied) StreamProxy.wrap(it, headers) else it }
                     val file = java.io.File(App.context.cacheDir, "quality-${v.url.hashCode()}.m3u8").apply { writeText(text) }
                     Uri.fromFile(file).toString()
@@ -332,9 +379,12 @@ class PlayerController(
     private fun loadVariants(link: ExtractorLink) {
         mastersJob?.cancel()
         master = null; variants = emptyList(); variant = null
-        if (!(link.isM3u8 || link.url.substringBefore('?').endsWith(".m3u8"))) return
+        if (!(link.isM3u8 || link.url.substringBefore('?').endsWith(".m3u8") || link.url.startsWith("data:", true))) return
         mastersJob = scope.launch {
             val m = withContext(Dispatchers.IO) {
+                io.github.sherazi5110.cloudstream.DataUrl.decode(link.url)?.let { text ->
+                    return@withContext runCatching { HlsVariants.parse(text, link.referer.ifBlank { "https://localhost/" }) }.getOrNull()
+                }
                 runCatching {
                     val request = okhttp3.Request.Builder().url(link.url).apply {
                         headersOf(link).forEach { (k, v) -> header(k, v) }
@@ -375,7 +425,8 @@ class PlayerController(
         grace?.cancel()
         lastVariantUrl = variantUrl
         playCalledAt = android.os.SystemClock.elapsedRealtime()
-        val keep = if (started) time.takeIf { it > 0 } ?: startAt else startAt
+        // Switching or reloading a source goes on from where it was, even after it failed (the clock then reads 0).
+        val keep = lastGoodTime.takeIf { it > 0 } ?: startAt
         if (variantUrl == null && (current?.url != link.url || variant != null)) loadVariants(link.also { current = it })
         current = link
         matchSurface(link)
@@ -386,19 +437,32 @@ class PlayerController(
         val headers = buildMap {
             putAll(link.headers)
             if (link.referer.isNotBlank() && keys.none { it.equals("Referer", true) }) put("Referer", link.referer)
+            if (keys.none { it.equals("User-Agent", true) }) put("User-Agent", USER_AGENT)
         }
-        val needsProxy = headers.keys.any { !it.equals("Referer", true) && !it.equals("User-Agent", true) }
         val source = (variantUrl ?: link.url).removeSuffix(io.github.sherazi5110.cloudstream.LiveApi.EXPIRED_MARK)
+        // HLS (not Live TV) always goes through the local proxy: libVLC's own HTTP/2 client gave up on servers that
+        // reset streams ("http demux: local stream error: Stream closed", then "cannot peek" and the video stopped),
+        // while OkHttp retries and reuses connections; the proxy also fixes disguised video segments.
+        val hls = api !is io.github.sherazi5110.cloudstream.LiveApi && !source.startsWith("file:") &&
+            (link.isM3u8 || source.substringBefore('?').endsWith(".m3u8", true))
+        // A playlist given inline (data: address, e.g. NetMirror): only the proxy can serve it to libVLC.
+        val inline = source.startsWith("data:", true)
+        val headersNeedProxy = inline || headers.keys.any { !it.equals("Referer", true) && !it.equals("User-Agent", true) }
+        // A source that failed through the proxy is tried once directly (as before), in case the server objects to it.
+        val viaProxyForHls = hls && !headersNeedProxy && link.url !in directTried
+        proxiedOnlyForHls = viaProxyForHls
+        val needsProxy = viaProxyForHls || headersNeedProxy
         // A Live TV server with an expired (but genuine) certificate: through the local proxy, which accepts it.
         val expiredOk = link.name == io.github.sherazi5110.cloudstream.LiveApi.EXPIRED
         val url = if (source.startsWith("file:")) source else if (needsProxy || expiredOk) StreamProxy.wrap(source, headers, expiredOk) else source
         val media = Media(Vlc.lib, Uri.parse(url)).apply {
-            setHWDecoderEnabled(true, false)
+            setHWDecoderEnabled(!softwareDecode, false)
             if (!needsProxy) {
                 addOption(":http-user-agent=" + (headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: USER_AGENT))
                 headers.entries.firstOrNull { it.key.equals("Referer", true) }?.let { addOption(":http-referrer=${it.value}") }
             }
             if (keep > 0) addOption(":start-time=${keep / 1000.0}")
+            bufferOptions(variantUrl).forEach { addOption(it) }
             // Even out loud and quiet sounds: a gentle compressor with make-up gain (voices up, peaks down).
             if (io.github.sherazi5110.cloudstream.Settings.levelAudio) {
                 addOption(":audio-filter=compressor")
@@ -414,12 +478,17 @@ class PlayerController(
         // took seconds and froze the screen ("not responding"). Like VLC for Android, it runs on its own thread.
         val rate = speed
         val scale = zoom.scale
+        val volume = boost
         opening = true
         VlcThread.run {
             try {
+                // 5.1/7.1 sound: by default libVLC plays every channel the device can (multichannel on TVs and
+                // receivers, mixed down to stereo on phones); passthrough sends Dolby/DTS untouched to a receiver.
+                runCatching { player.setAudioDigitalOutputEnabled(Settings.passthrough) }
                 player.media = media
                 media.release()
                 player.play()
+                player.volume = volume
                 player.rate = rate
                 player.videoScale = scale
             } finally { opening = false }
@@ -505,6 +574,12 @@ class PlayerController(
 
     /** A source failed: try the next untried one, like the Linux player. */
     private fun failover() {
+        val cur = current
+        if (cur != null && proxiedOnlyForHls && directTried.add(cur.url)) {
+            android.util.Log.w("player", "${cur.name}: failed through the proxy, trying it directly")
+            play(cur, lastVariantUrl)
+            return
+        }
         val next = ranked().firstOrNull { it.url !in tried }
         if (next != null) {
             App.toast("${current?.name ?: "Source"} failed, trying ${next.name}")
@@ -665,8 +740,48 @@ class PlayerController(
     fun seekBy(ms: Long) = seekTo((time + ms).coerceIn(0, length.takeIf { it > 0 } ?: Long.MAX_VALUE))
 
     fun seekTo(ms: Long) {
-        time = ms
+        time = ms; lastGoodTime = ms; lastSeekAt = android.os.SystemClock.elapsedRealtime()
         VlcThread.run { player.setTime(ms) }
+    }
+
+    /**
+     * Settings → Player → Buffering: how much loads before starting (and after a jump), how far ahead it keeps
+     * loading, and the most memory that may take. The time ahead is cut to what fits in that memory at the stream's
+     * bitrate (3 minutes of a 25 Mbit/s 4K stream would be over 500 MB).
+     */
+    private fun bufferOptions(variantUrl: String?): List<String> {
+        val memMb = Settings.bufferMemoryMb.takeIf { it > 0 } ?: if (io.github.sherazi5110.cloudstream.Images.lowMemoryDevice) 48 else 160
+        val bitrate = (variants.firstOrNull { it.url == variantUrl } ?: variants.maxByOrNull { it.bandwidth ?: 0 })?.bandwidth
+        val fits = bitrate?.takeIf { it > 0 }?.let { (memMb * 8L * 1024 * 1024 / it).toInt() } ?: Int.MAX_VALUE
+        val aheadSec = minOf(Settings.bufferAheadSec, fits).coerceAtLeast(10)
+        return listOf(
+            ":network-caching=${Settings.startBufferMs}",
+            ":adaptive-maxbuffer=${aheadSec * 1000}",
+            ":prefetch-buffer-size=${memMb * 1024}",
+        )
+    }
+
+    /** Set when the video keeps stopping to load: the player suggests a lower quality or another source. */
+    var slowWarning by mutableStateOf(false)
+    private val stalls = ArrayDeque<Long>()
+
+    /** Counts a pause to load mid-video; three within two minutes means the connection can't keep up. */
+    private fun stalled() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        stalls.addLast(now)
+        while (stalls.isNotEmpty() && now - stalls.first() > 120_000) stalls.removeFirst()
+        if (stalls.size >= 3 && !slowWarningShown) { slowWarning = true; slowWarningShown = true }
+    }
+    private var slowWarningShown = false
+    private var lastSeekAt = 0L
+    /** Sources already tried without the proxy, and whether the current one went through it only because it's HLS. */
+    private val directTried = mutableSetOf<String>()
+    private var proxiedOnlyForHls = false
+
+    fun changeBoost(percent: Int) {
+        boost = percent.coerceIn(100, 200)
+        Settings.volumeBoost = boost
+        VlcThread.run { player.volume = boost }
     }
 
     fun setRate(rate: Float) {

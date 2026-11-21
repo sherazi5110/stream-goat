@@ -153,7 +153,7 @@ object Settings {
      */
     var showNsfw: Boolean
         get() = string("show_nsfw", "false") == "true"
-        set(v) = put("show_nsfw", v)
+        set(v) { put("show_nsfw", v); ContentFilter.syncAdult() }
 
     /** Where downloads go; blank = ~/Downloads/CloudStream. */
     var downloadFolder: String

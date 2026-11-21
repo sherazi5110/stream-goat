@@ -89,6 +89,17 @@ object Network {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(RetryOnReset)
+            .apply {
+                // CS_HTTP_LOG=1: every request and its answer on stderr (for finding why an extension fails).
+                if (System.getenv("CS_HTTP_LOG") == "1") addNetworkInterceptor { chain ->
+                    val req = chain.request()
+                    System.err.println("HTTP> ${req.method} ${req.url} ${req.headers.names().joinToString(",")}")
+                    val res = chain.proceed(req)
+                    val peek = runCatching { res.peekBody(400).string().replace('\n', ' ') }.getOrDefault("")
+                    System.err.println("HTTP< ${res.code} ${req.url.host}${req.url.encodedPath} ${peek.take(300)}")
+                    res
+                }
+            }
             .build()
         client = base.newBuilder().dns(SmartDns(base, Settings.dns, Settings.dnsFallback)).build()
         app.baseClient = client

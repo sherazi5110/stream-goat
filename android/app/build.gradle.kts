@@ -100,6 +100,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.core:core-ktx:1.18.0")
@@ -143,7 +144,7 @@ dependencies {
     // Unit tests run on this computer (Linux): its native library, for a seeder-to-player test on localhost.
     testImplementation("org.libtorrent4j:libtorrent4j-linux:$libtorrent")
     // NewPipe Extractor, which the official app ships: extensions such as YoutubeProvider (official repository) use it.
-    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1")
     // QR codes for "Add from phone" (scan with the phone's camera).
     implementation("com.google.zxing:core:3.5.3")
 

@@ -164,8 +164,21 @@ private val typography = Typography(
     labelSmall = base.copy(fontWeight = FontWeight.SemiBold, fontSize = 10.sp),
 )
 
+/** The chosen text size (Settings → Appearance → Text size), applied to every screen. */
+object TextSize {
+    var scale by androidx.compose.runtime.mutableFloatStateOf(io.github.sherazi5110.cloudstream.Settings.textScale)
+}
+
 @Composable
 fun CloudStreamTheme(content: @Composable () -> Unit) {
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, d.fontScale * TextSize.scale)
+    ) { ThemedContent(content) }
+}
+
+@Composable
+private fun ThemedContent(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Palette.accent,

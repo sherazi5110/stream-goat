@@ -59,6 +59,23 @@ object WeTrakr {
         }
     }
 
+    /** An authorised GET (the sync reads): status and body text, or null when not signed in or offline. */
+    internal suspend fun get(path: String): Pair<Int, String>? {
+        val token = token() ?: return null
+        val request = okhttp3.Request.Builder().url(api + path)
+            .header("wetrakr-api-version", "1")
+            .header("wetrakr-api-key", clientId)
+            .header("User-Agent", userAgent)
+            .header("Authorization", "Bearer $token").get().build()
+        return runCatching { app.baseClient.newCall(request).execute().use { r -> r.code to r.body.string() } }.getOrNull()
+    }
+
+    /** An authorised POST (sync writes). */
+    internal suspend fun postAuthed(path: String, body: JSONObject): Int? {
+        val token = token() ?: return null
+        return runCatching { post(path, body, token).first }.getOrNull()
+    }
+
     /** Step 1: a code for the person to enter at [DeviceCode.url] (on any phone or computer). */
     suspend fun start(): DeviceCode = withContext(Dispatchers.IO) {
         if (!available) throw Failure("WeTrakr isn't set up in this build yet")
@@ -102,6 +119,7 @@ object WeTrakr {
         val refresh = prefs.getString("refresh", null)
         val access = prefs.getString("access", null)
         prefs.edit().remove("access").remove("refresh").remove("expires").apply()
+        WeTrakrSync.forget()
         if (refresh != null) scope.launch { runCatching { post("/oauth/logout", JSONObject().put("refresh_token", refresh), access) } }
     }
 

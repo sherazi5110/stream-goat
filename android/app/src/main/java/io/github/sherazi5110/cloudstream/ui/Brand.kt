@@ -91,14 +91,16 @@ fun Waves(modifier: Modifier, accent: Color = Palette.accent, alpha: Float = 1f)
     val t by rememberInfiniteTransition(label = "waves").animateFloat(0f, (2 * PI).toFloat(),
         infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Restart), label = "phase")
     val second = Brand.companion(accent)
+    // Light enough for TVs and old phones: fewer lines and points, and the paths are reused frame to frame.
+    val lines = 16
+    val paths = androidx.compose.runtime.remember { List(lines) { Path() } }
     Canvas(modifier.background(Color.Black)) {
-        val lines = 26
         val w = size.width; val h = size.height
-        val step = (w / 90f).coerceAtLeast(6f)
+        val step = (w / 48f).coerceAtLeast(10f)
         for (i in 0 until lines) {
             val f = i / (lines - 1f)
             val base = h * (-0.15f + 1.3f * f)
-            val path = Path()
+            val path = paths[i].apply { reset() }
             var x = -step
             var first = true
             while (x <= w + step) {
@@ -114,8 +116,8 @@ fun Waves(modifier: Modifier, accent: Color = Palette.accent, alpha: Float = 1f)
             val c = lerp(accent, second, (0.5f + 0.5f * sin(t + i * 0.4f)) * 0.8f)
             val crest = 0.55f + 0.45f * sin(t * 2f + i * 0.9f)
             val brush = Brush.horizontalGradient(listOf(c.copy(alpha = 0.25f * alpha), lerp(c, Color.White, 0.25f * crest).copy(alpha = alpha), c.copy(alpha = 0.35f * alpha)))
-            drawPath(path, brush, style = Stroke(width = 9f, cap = StrokeCap.Round), alpha = 0.18f)
-            drawPath(path, brush, style = Stroke(width = 2.4f, cap = StrokeCap.Round))
+            if (i % 2 == 0) drawPath(path, brush, style = Stroke(width = 9f), alpha = 0.16f)
+            drawPath(path, brush, style = Stroke(width = 2.4f))
         }
     }
 }

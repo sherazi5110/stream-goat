@@ -81,7 +81,7 @@ object Engine {
     fun providers(): List<MainAPI> = allProviders().filter { ContentFilter.allows(it) }
 
     /** Every loaded extension and add-on, whatever the profile. */
-    fun allProviders(): List<MainAPI> = (APIHolder.allProviders.toList() + StremioAddons.apis())
+    fun allProviders(): List<MainAPI> = (APIHolder.allProviders.withLock { APIHolder.allProviders.toList() } + StremioAddons.apis())
         .onEach { SiteOverrides.apply(it) }
         .sortedBy { it.name.lowercase() }
 

@@ -35,6 +35,17 @@ object Vlc {
             return current
         }
 
+    /** VLC has been started (or found missing): reading [factory] won't wait. */
+    val isLoaded: Boolean get() = loaded
+
+    /**
+     * Starts VLC in the background soon after the app opens (issue #68): its first start can take many seconds on
+     * Windows (it scans its plugins), which froze the window when Settings or a video was opened first.
+     */
+    fun warmUp(then: (() -> Unit)? = null) {
+        Thread({ runCatching { factory }; then?.invoke() }, "vlc-start").apply { isDaemon = true }.start()
+    }
+
     /**
      * Subtitle style and battery saver are engine options: restart the engine to apply
      * them, now if nothing is playing, otherwise when playback ends.

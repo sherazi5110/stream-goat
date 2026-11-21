@@ -122,6 +122,8 @@ private fun Details(api: MainAPI, r: LoadResponse) {
     val edge = if (wide) 40.dp else 16.dp
     val context = LocalContext.current
     val playables = remember(r) { Engine.playables(r) }
+    // Two-way WeTrakr: what was watched in other apps shows as watched here.
+    LaunchedEffect(r) { runCatching { io.github.sherazi5110.cloudstream.WeTrakrSync.apply(api.name, r, playables) } }
     val isSeries = r is TvSeriesLoadResponse || r is AnimeLoadResponse
     val dubs = remember(playables) { playables.map { it.dub }.distinct() }
     var dub by remember(r) { mutableStateOf(dubs.firstOrNull()) }
@@ -191,7 +193,7 @@ private fun Details(api: MainAPI, r: LoadResponse) {
             }
             ActionButton(Icons.Filled.Check, if (allWatched) "Watched" else "Mark as watched", tint = if (allWatched) Palette.watched else Color.White) {
                 if (allWatched) Library.markUnwatched(api.name, r.url, playables.map { it.data })
-                else Library.markWatched(api.name, r.url, r.name, r.posterUrl, playables.map { it.data to it.label })
+                else { Library.markWatched(api.name, r.url, r.name, r.posterUrl, playables.map { it.data to it.label }); io.github.sherazi5110.cloudstream.WeTrakrSync.push(r, playables) }
             }
             ActionButton(if (bookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder, if (bookmarked) "In My list" else "Add to My list") {
                 Library.toggleBookmark(Bookmark(api.name, r.url, r.name, r.posterUrl, r.type.name, System.currentTimeMillis()))
@@ -254,7 +256,7 @@ private fun Details(api: MainAPI, r: LoadResponse) {
                             SectionTitle("Cast", Modifier.padding(horizontal = edge))
                             TvRowScroll { LazyRow(contentPadding = PaddingValues(horizontal = edge, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 items(cast.take(30)) { (name, role, photo) ->
-                                    Column(Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Column(Modifier.width(104.dp).card(RoundedCornerShape(12.dp)) { Nav.search(name) }, horizontalAlignment = Alignment.CenterHorizontally) {
                                         NetImage(photo, Modifier.size(92.dp).clip(CircleShape))
                                         Text(name, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                                         role?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -457,7 +459,7 @@ private fun EpisodeMenu(open: Boolean, api: MainAPI, r: LoadResponse, ep: Playab
         if (watched) DropdownMenuItem(text = { Text("Mark as not watched") }, leadingIcon = { Icon(Icons.Filled.Refresh, null) },
             onClick = { onDismiss(); Library.markUnwatched(api.name, r.url, listOf(ep.data)) })
         else DropdownMenuItem(text = { Text("Mark as watched") }, leadingIcon = { Icon(Icons.Filled.Check, null) },
-            onClick = { onDismiss(); Library.markWatched(api.name, r.url, r.name, r.posterUrl, listOf(ep.data to ep.label)) })
+            onClick = { onDismiss(); Library.markWatched(api.name, r.url, r.name, r.posterUrl, listOf(ep.data to ep.label)); io.github.sherazi5110.cloudstream.WeTrakrSync.push(r, listOf(ep)) })
         DropdownMenuItem(text = { Text("Choose source") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
             onClick = { onDismiss(); Playback.play(api, r, ep, chooseSource = true) })
     }

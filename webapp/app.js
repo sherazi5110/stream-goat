@@ -150,7 +150,13 @@ class NeedsConfig extends Error {
 
 async function installAddon(input, force, first) {
   const url = manifestUrl(input);
-  const m = await fetchJson(url);
+  let m;
+  try { m = await fetchJson(url); } catch (e) {
+    // 404: nothing at that address. Often a CloudStream repository link (those work only in the apps) or a page address.
+    if (/HTTP 40[34]/.test(e.message)) throw new Error(`No Stremio add-on at ${new URL(url).host} (${e.message.replace("HTTP ", "error ")}). ` +
+      "Check the link: it should end in /manifest.json. CloudStream repositories (repo.json) work only in the Stream Goat apps.");
+    throw e;
+  }
   if (!m || !m.id || !m.resources) throw new Error("That isn't a Stremio add-on manifest");
   // The plain link of a configurable add-on (debrid services, etc.) has no account in it: it returns nothing.
   if (!force && m.behaviorHints && m.behaviorHints.configurationRequired) throw new NeedsConfig(m, url);

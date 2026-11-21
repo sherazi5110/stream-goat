@@ -38,7 +38,9 @@ object App {
     fun detectTv(): Boolean {
         val ui = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
         return ui.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            // Projectors and TV boxes that don't call themselves TVs: no touchscreen means a remote.
+            !context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
     }
 
     fun init(context: Context) {
@@ -48,6 +50,17 @@ object App {
         // NewPipe Extractor, as the official app sets it up (YouTube extensions call it directly).
         runCatching { org.schabi.newpipe.extractor.NewPipe.init(com.lagradost.cloudstream3.DownloaderTestImpl.getInstance()) }
         io.github.sherazi5110.cloudstream.ui.ThemeState.load()
+        Images.install()
+        // The Browse tab was removed: its history, saved sites, logos and ad-block lists go too (once).
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                listOf("browse_history", "browse_bookmarks", "web_watching", "adblock_sites_off").forEach { context.deleteSharedPreferences(it) }
+                java.io.File(context.filesDir, "adblock").deleteRecursively()
+                java.io.File(context.filesDir, "site_icons").deleteRecursively()
+            }
+        }
+        WeTrakrSync.start()
+        ContentFilter.syncAdult()
         // A profile switch changes the look, the library and which extensions show.
         Profiles.onChange {
             io.github.sherazi5110.cloudstream.ui.ThemeState.load()

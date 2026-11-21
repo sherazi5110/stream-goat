@@ -111,6 +111,9 @@ object Library {
     }
 
     /** Marks the episode a Continue Watching entry is on as watched. */
+    /** Tells the screens to redraw (after watched marks arrived from WeTrakr). */
+    fun notifyChanged() = listeners.forEach { it() }
+
     fun markWatched(e: WatchEntry) = markWatched(e.apiName, e.url, e.name, e.posterUrl, listOf(e.episodeData to e.episodeLabel))
 
     fun isWatched(apiName: String, episodeData: String) =
