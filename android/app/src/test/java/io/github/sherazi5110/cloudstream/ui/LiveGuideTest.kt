@@ -77,4 +77,12 @@ class LiveGuideTest {
         assertEquals(false, LogoTone.darkPixels(IntArray(100) { if (it % 3 == 0) white else clear }))
         assertEquals(false, LogoTone.darkPixels(IntArray(100) { black }))
     }
+
+    @Test fun `a link check finishing while the guide sorts doesn't crash it`() {
+        // "Working" changes between two reads (the check running): sorting used to throw "Comparison method violates its general contract".
+        val many = (0 until 3000).map { ch("C$it", "PK", "News") }
+        val flaky = java.util.Random(1)
+        val sorted = LiveFilters.order(many, { flaky.nextBoolean() }, { flaky.nextBoolean() })
+        assertEquals(3000, sorted.size)
+    }
 }

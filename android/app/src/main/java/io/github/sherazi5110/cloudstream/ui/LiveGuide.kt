@@ -87,8 +87,16 @@ internal object LiveFilters {
     }
 
     /** Working channels first, then the ones with a guide, then by name; numbered in that order. */
-    fun order(list: List<LiveTv.Channel>, broken: (LiveTv.Channel) -> Boolean, hasGuide: (LiveTv.Channel) -> Boolean): List<LiveTv.Channel> =
-        list.sortedWith(compareBy<LiveTv.Channel>({ broken(it) }, { !hasGuide(it) }, { it.name.lowercase() }))
+    fun order(list: List<LiveTv.Channel>, broken: (LiveTv.Channel) -> Boolean, hasGuide: (LiveTv.Channel) -> Boolean): List<LiveTv.Channel> {
+        // Each channel's key read once, before sorting: the link check changes "working" while the list is sorted,
+        // and a key that changes mid-sort crashed it ("Comparison method violates its general contract").
+        class Key(val c: LiveTv.Channel, val broken: Boolean, val noGuide: Boolean, val name: String)
+        return list.map { Key(it, broken(it), !hasGuide(it), it.name.lowercase()) }
+            .sortedWith(compareBy<Key>({ it.broken }, { it.noGuide }, { it.name })).map { it.c }
+    }
+
+    /** The last order worked out (per channel list), so coming back from the player shows it at once. */
+    @Volatile internal var lastOrder: Pair<List<LiveTv.Channel>, List<LiveTv.Channel>>? = null
 }
 
 /**
@@ -111,7 +119,17 @@ internal fun LiveGuide(
     val favs = remember(favVersion) { LiveTv.favourites() }
     val broken: (LiveTv.Channel) -> Boolean = { LiveTv.health(it)?.ok == false || (LiveTv.hideRegionLocked && LiveTv.lockedOut(it)) }
     val hasGuide: (LiveTv.Channel) -> Boolean = { LiveTv.nowNext(it, now).let { (a, b) -> a != null || b != null } }
-    val ordered = remember(all, guideVersion, healthVersion) { LiveFilters.order(all, broken, hasGuide) }
+    // A running link check changes healthVersion for every channel checked: follow it at most every 5 seconds.
+    var healthSeen by remember { mutableStateOf(healthVersion) }
+    val latestHealth by androidx.compose.runtime.rememberUpdatedState(healthVersion)
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { latestHealth }.collect { v -> if (v != healthSeen) { kotlinx.coroutines.delay(5_000); healthSeen = latestHealth } }
+    }
+    // Sorting thousands of channels (All sources) is done off the screen's thread; meanwhile the last order shows.
+    val ordered by androidx.compose.runtime.produceState(LiveFilters.lastOrder?.takeIf { it.first === all }?.second ?: all, all, guideVersion, healthSeen) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { LiveFilters.order(all, broken, hasGuide) }
+        LiveFilters.lastOrder = all to value
+    }
     val numbers = remember(ordered) { ordered.withIndex().associate { (i, c) -> c.key to i + 1 } }
 
     var choice by remember {
@@ -140,7 +158,7 @@ internal fun LiveGuide(
                 count = { cc -> inOthers { c -> LiveFilters.inCountry(c, cc) && LiveFilters.inSource(c, used.source, broken) }.size },
                 selected = used.country,
             ) { cc -> choice = choice.copy(country = cc); Settings.liveCountry = cc ?: "ALL" }
-            val inCountry = ordered.filter { LiveFilters.inCountry(it, used.country) && LiveFilters.inSource(it, used.source, broken) }
+            val inCountry = remember(ordered, used) { ordered.filter { LiveFilters.inCountry(it, used.country) && LiveFilters.inSource(it, used.source, broken) } }
             FilterChip(
                 label = categoryName(used.category),
                 options = listOf(LiveFilters.FAV, LiveFilters.ALL) + inCountry.flatMap { it.groups.ifEmpty { listOf("Other") } }.groupingBy { it }.eachCount()
@@ -157,7 +175,7 @@ internal fun LiveGuide(
                 count = { k -> inCountry.count { LiveFilters.inLanguage(it, k, LiveTv::languagesOf) && LiveFilters.inCategory(it, used.category, favs) } },
                 selected = used.language,
             ) { k -> choice = choice.copy(language = k); Settings.liveLanguage = k }
-            val inPlace = ordered.filter { LiveFilters.inCountry(it, used.country) && LiveFilters.inCategory(it, used.category, favs) && LiveFilters.inLanguage(it, used.language, LiveTv::languagesOf) }
+            val inPlace = remember(ordered, used, favs, langVersion) { ordered.filter { LiveFilters.inCountry(it, used.country) && LiveFilters.inCategory(it, used.category, favs) && LiveFilters.inLanguage(it, used.language, LiveTv::languagesOf) } }
             FilterChip(
                 label = sourceName(used.source),
                 options = listOf(LiveFilters.WORKING, LiveFilters.ALL) + inPlace.map { it.source }.distinct(),
@@ -165,7 +183,8 @@ internal fun LiveGuide(
                 count = { k -> inPlace.count { LiveFilters.inSource(it, k, broken) } },
                 selected = used.source,
             ) { k -> choice = choice.copy(source = k); Settings.liveSourceFilter = k }
-            Text("${rows.size} channels · ${rows.count(hasGuide)} with guide", style = MaterialTheme.typography.labelMedium, color = Palette.muted,
+            val withGuide = remember(rows, now) { rows.count(hasGuide) }
+            Text("${rows.size} channels · $withGuide with guide", style = MaterialTheme.typography.labelMedium, color = Palette.muted,
                 maxLines = 1, modifier = Modifier.weight(1f).padding(start = 6.dp))
             IconAction(Icons.Filled.GridView, "Channel cards") { onCards() }
             IconAction(Icons.Filled.Refresh, "Refresh channels and guide") { onRefresh() }
@@ -179,7 +198,11 @@ internal fun LiveGuide(
         when {
             rows.isEmpty() -> EmptyState("No channels", if (used.category == LiveFilters.FAV) "No favourites yet: hold a channel down (or press Menu on it) to add it."
                 else "Nothing for this choice. Pick another country, category or language at the top.", Modifier.fillMaxWidth())
-            else -> GuideGrid(rows, now, guideVersion, wide, onPlay = { LivePlayback.play(scope, it, rows) }, modifier = Modifier.weight(1f),
+            else -> GuideGrid(rows, now, guideVersion, wide, onPlay = { c ->
+                // Touch: the first tap shows it in the preview, a tap on it again watches full screen (the remote's
+                // OK is on the selected channel already, so it watches at once).
+                if (!isTv && sel?.key != c.key) selected = c else LivePlayback.play(scope, c, rows)
+            }, modifier = Modifier.weight(1f),
                 numbers = numbers, startKey = start?.key,
                 onFocus = { c, p -> selected = c; selectedProg = p },
                 onMenu = { menuFor = it })

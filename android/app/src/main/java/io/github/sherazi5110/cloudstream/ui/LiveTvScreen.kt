@@ -197,7 +197,8 @@ fun LiveTvScreen() {
     val scope = rememberCoroutineScope()
     var version by remember { mutableIntStateOf(0) }
     DisposableEffect(Unit) { val off = LiveTv.onChange { version++ }; onDispose { off() } }
-    var channels by remember { mutableStateOf<List<LiveTv.Channel>?>(null) }
+    // Back from a channel: the list loaded before shows at once (it used to load again, with a spinner).
+    var channels by remember { mutableStateOf(shownChannels?.takeIf { it.first == io.github.sherazi5110.cloudstream.Settings.liveSource }?.second) }
     var guideVersion by remember { mutableIntStateOf(0) }
     var force by remember { mutableStateOf(false) }
     // One source or all of them, as on Windows/Linux ("All sources ▾").
@@ -207,7 +208,10 @@ fun LiveTvScreen() {
     var pickingSource by remember { mutableStateOf(false) }
     LaunchedEffect(version, force, sourceId) {
         if (sourceId != null && LiveTv.sources().none { it.id == sourceId && it.enabled }) sourceId = null
-        channels = LiveTv.channels(sourceId, force = force)
+        val loaded = LiveTv.channels(sourceId, force = force)
+        // The same channels again: keep the list (and with it the guide's order) as it is.
+        if (channels?.map { it.key } != loaded.map { it.key } || force) channels = loaded
+        shownChannels = sourceId to (channels ?: loaded)
         force = false
         runCatching { LiveTv.loadGuides() }
         guideVersion++
@@ -250,6 +254,9 @@ fun LiveTvScreen() {
 }
 
 private var isWideNow = false
+
+/** The channels last shown, for their source: Live TV opens on them at once when coming back. */
+private var shownChannels: Pair<String?, List<LiveTv.Channel>>? = null
 
 @Composable
 private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int, scope: CoroutineScope, sourceName: String, onSources: () -> Unit, onRefresh: () -> Unit) {
