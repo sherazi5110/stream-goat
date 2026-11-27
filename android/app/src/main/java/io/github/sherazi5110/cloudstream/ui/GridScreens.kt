@@ -70,7 +70,11 @@ fun BackBar(title: String, modifier: Modifier = Modifier) {
     }
 }
 
-private val gridCells @Composable get() = if (isWide) GridCells.Adaptive(140.dp) else GridCells.Adaptive(108.dp)
+private val gridCells @Composable get() = posterCells(if (isWide) 140.dp else 108.dp)
+
+/** Grid columns for posters [width] wide (wider ones for wide posters, Settings → Appearance → Posters). */
+internal fun posterCells(width: androidx.compose.ui.unit.Dp) =
+    GridCells.Adaptive(if (io.github.sherazi5110.cloudstream.Settings.widePosters) width * 1.6f else width)
 
 /** "See all": a catalog's pages, loading the next one near the bottom until the extension says there are no more. */
 @Composable
@@ -193,7 +197,7 @@ fun SearchScreen() {
             results.isEmpty() && !App.online() -> OfflineState(Modifier.fillMaxWidth()) { submit(query) }
             results.isEmpty() -> EmptyState("Nothing found", (scopedApi?.let { "${it.name} had" } ?: "No extension had") + " results for \"$query\".", Modifier.fillMaxWidth())
             // One extension: its results as a grid.
-            scopedApi != null -> LazyVerticalGrid(GridCells.Adaptive(if (isWide) 140.dp else 112.dp),
+            scopedApi != null -> LazyVerticalGrid(posterCells(if (isWide) 140.dp else 112.dp),
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + LocalBottomInset.current), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 uniqueItems(results.flatMap { it.second }, key = { it.url }) { item -> PosterCard(item, 200.dp, Modifier.fillMaxWidth()) { openTitle(item) } }
             }

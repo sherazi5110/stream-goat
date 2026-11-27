@@ -268,6 +268,22 @@ private fun AppearanceSection() {
         yt = it; io.github.sherazi5110.cloudstream.Settings.showYouTube = it
         if (!it && Nav.tab == Tab.YOUTUBE) Nav.select(Tab.HOME)
     }
+    var live by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.showLiveTv) }
+    SwitchRow("Live TV tab", "Off hides the tab (your sources and favourites stay).", live) {
+        live = it; io.github.sherazi5110.cloudstream.Settings.showLiveTv = it
+        if (!it && Nav.tab == Tab.LIVE) Nav.select(Tab.HOME)
+    }
+    var music by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.showMusic) }
+    SwitchRow("Music tab", "Off hides the tab (your playlists and liked songs stay).", music) {
+        music = it; io.github.sherazi5110.cloudstream.Settings.showMusic = it
+        if (!it && Nav.tab == Tab.MUSIC) Nav.select(Tab.HOME)
+    }
+    Heading("Posters")
+    var shape by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.posterShape) }
+    ChoiceChips(listOf("PORTRAIT", "LANDSCAPE"), { if (it == "PORTRAIT") "Tall (portrait)" else "Wide (landscape)" }, { it == shape }) {
+        shape = it; io.github.sherazi5110.cloudstream.Settings.posterShape = it
+    }
+    Hint("Wide shows each title's wide artwork (from TMDB when it's on in Metadata, else Cinemeta); a title without one shows its whole poster.")
 
     Heading("Pictures")
     var lowRes by remember { mutableStateOf(Settings.lowResImages) }

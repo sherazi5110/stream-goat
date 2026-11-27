@@ -251,6 +251,19 @@ object Settings {
     var showYouTube: Boolean
         get() = string("show_youtube", "true").toBoolean()
         set(v) = put("show_youtube", v.toString())
+    /** Settings → Appearance → Tabs: the Live TV and Music tabs (off hides them, like YouTube). */
+    var showLiveTv: Boolean
+        get() = string("show_livetv", "true").toBoolean()
+        set(v) = put("show_livetv", v.toString())
+    var showMusic: Boolean
+        get() = string("show_music", "true").toBoolean()
+        set(v) = put("show_music", v.toString())
+
+    /** Settings → Appearance → Posters: "PORTRAIT" (tall, as the extensions give them) or "LANDSCAPE" (wide). */
+    var posterShape: String
+        get() = string("poster_shape", "PORTRAIT")
+        set(v) = put("poster_shape", v)
+    val widePosters: Boolean get() = posterShape == "LANDSCAPE"
 
     var askEngine: Boolean
         get() = string("ask_engine", "false").toBoolean()

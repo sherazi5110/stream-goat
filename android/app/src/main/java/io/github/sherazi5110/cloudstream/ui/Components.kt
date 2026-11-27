@@ -2,6 +2,7 @@ package io.github.sherazi5110.cloudstream.ui
 
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.pointer.pointerInput
@@ -313,9 +314,11 @@ fun PosterCard(
     // Hidden titles (long-press → Hide) don't show anywhere a poster is listed.
     if (io.github.sherazi5110.cloudstream.Hidden.isHidden(item.url)) return
     var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    Column(modifier.width(width)) {
+    // Settings → Appearance → Posters: wide cards (about the same height as a tall poster's two thirds).
+    val wide = io.github.sherazi5110.cloudstream.Settings.widePosters
+    Column(modifier.width(if (wide) width * 1.6f else width)) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(2f / 3f)
+            Modifier.fillMaxWidth().aspectRatio(if (wide) 16f / 9f else 2f / 3f)
                 .card(onFocus = onFocus, onLongClick = onLongClick ?: { menu = true }, selectFirst = true, onClick = onClick)
         ) {
             androidx.compose.material3.DropdownMenu(menu, { menu = false }, Modifier.freshOkOnly()) {
@@ -325,7 +328,7 @@ fun PosterCard(
                     io.github.sherazi5110.cloudstream.App.toast("Hidden. Restore it in Settings → Profiles → Hidden titles")
                 })
             }
-            NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders)
+            if (wide) WideArt(item) else NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders)
             item.scoreText()?.let { ScoreBadge(it, Modifier.align(Alignment.TopStart).padding(6.dp)) }
             WatchedStamp(item)
             PosterRating(item, Modifier.align(Alignment.BottomStart).padding(6.dp))
@@ -334,6 +337,25 @@ fun PosterCard(
             item.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
         )
+    }
+}
+
+/**
+ * A wide card's picture: the title's wide artwork ([io.github.sherazi5110.cloudstream.Metadata.backdrop]); until it
+ * arrives, or when there's none, the whole tall poster in the middle over a blurred, dimmed copy of itself.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.WideArt(item: SearchResponse) {
+    val art by androidx.compose.runtime.produceState<String?>(null, item.url) {
+        value = runCatching { io.github.sherazi5110.cloudstream.Metadata.backdrop(item) }.getOrNull()
+    }
+    val url = art
+    if (url != null) NetImage(url, Modifier.fillMaxSize())
+    else {
+        NetImage(item.posterUrl, Modifier.fillMaxSize().blur(18.dp), item.posterHeaders)
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+        NetImage(item.posterUrl, Modifier.fillMaxSize().aspectRatio(2f / 3f, matchHeightConstraintsFirst = true).align(Alignment.Center), item.posterHeaders,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit)
     }
 }
 

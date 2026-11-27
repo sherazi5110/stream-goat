@@ -304,7 +304,8 @@ private fun PillItem(tab: Tab, icon: ImageVector, vertical: Boolean, size: andro
 /** Tabs this profile sees: no Live TV for kids unless allowed, no Extensions for kids. */
 private fun visibleTabs(tabs: List<Tab>): List<Tab> = tabs.filter { t ->
     when (t) {
-        Tab.LIVE -> io.github.sherazi5110.cloudstream.LiveTv.availableToProfile
+        Tab.LIVE -> io.github.sherazi5110.cloudstream.LiveTv.availableToProfile && io.github.sherazi5110.cloudstream.Settings.showLiveTv
+        Tab.MUSIC -> io.github.sherazi5110.cloudstream.Settings.showMusic
         Tab.EXTENSIONS -> !ProfileUi.current.kids
         Tab.YOUTUBE -> !ProfileUi.current.kids && io.github.sherazi5110.cloudstream.Settings.showYouTube
         else -> true

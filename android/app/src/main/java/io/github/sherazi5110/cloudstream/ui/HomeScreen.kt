@@ -457,9 +457,10 @@ private fun BannerPage(item: SearchResponse, rank: Int?, rowName: String?, heigh
 /** The last "poster" of every row: opens the whole catalog (easy to reach with a remote). */
 @Composable
 private fun ViewAllTile(title: String, width: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
-    Column(Modifier.width(width)) {
+    val wide = io.github.sherazi5110.cloudstream.Settings.widePosters
+    Column(Modifier.width(if (wide) width * 1.6f else width)) {
         Column(
-            Modifier.fillMaxWidth().aspectRatio(2f / 3f).card(selectFirst = true, onClick = onClick)
+            Modifier.fillMaxWidth().aspectRatio(if (wide) 16f / 9f else 2f / 3f).card(selectFirst = true, onClick = onClick)
                 .background(Palette.surfaceHigh, RoundedCornerShape(10.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
             horizontalAlignment = Alignment.CenterHorizontally,
