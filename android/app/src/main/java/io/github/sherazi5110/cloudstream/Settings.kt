@@ -250,20 +250,6 @@ object Settings {
     var liveSource: String?
         get() = string("live_source", "").ifBlank { null }
         set(v) = put("live_source", v ?: "")
-    /** Live TV opens on the TV guide or the cards, as last chosen: null = never chosen (guide on TVs and tablets). */
-    var liveGuideView: Boolean?
-        get() = string("live_view", "").let { if (it.isBlank()) null else it == "guide" }
-        set(v) = put("live_view", when (v) { null -> ""; true -> "guide"; false -> "cards" })
-    /** The TV guide's filters (Category, Language, Source), kept between visits like the country. */
-    var liveCategory: String
-        get() = string("live_category", "")
-        set(v) = put("live_category", v)
-    var liveLanguage: String
-        get() = string("live_language", "")
-        set(v) = put("live_language", v)
-    var liveSourceFilter: String
-        get() = string("live_source_filter", "working")
-        set(v) = put("live_source_filter", v)
 
     /** Whether the YouTube tab is shown (Settings → Appearance → Tabs). */
     var showYouTube: Boolean

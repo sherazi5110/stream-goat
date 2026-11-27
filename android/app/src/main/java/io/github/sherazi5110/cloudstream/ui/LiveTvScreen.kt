@@ -29,8 +29,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.filled.Star
@@ -339,11 +337,6 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     var selected by remember { mutableStateOf<LiveTv.Channel?>(null) }
     val banner = selected ?: recent.firstOrNull() ?: shown.firstOrNull()
     val edge = if (wide) 40.dp else 16.dp
-    // A TV or a tablet opens straight into the TV guide (TiviMate-style, with a live preview); phones get the cards.
-    val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
-    var guide by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.liveGuideView ?: (isTv || tablet)) }
-    LaunchedEffect(guide) { if (guide != (io.github.sherazi5110.cloudstream.Settings.liveGuideView ?: (isTv || tablet))) io.github.sherazi5110.cloudstream.Settings.liveGuideView = guide }
-
     val toolbar: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("$sourceName ▾", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier
@@ -355,7 +348,6 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
                         unfocusedBorderColor = Color.Transparent, focusedBorderColor = Palette.accent),
                     modifier = Modifier.weight(1f).widthIn(max = 420.dp))
                 Spacer(Modifier.weight(0.01f))
-                IconAction(if (guide) Icons.Filled.GridView else Icons.Filled.Schedule, if (guide) "Channels" else "TV guide") { guide = !guide }
                 IconAction(Icons.Filled.NetworkCheck, "Check channels") {
                     if (checkJob?.isActive == true) return@IconAction
                     // The channels showing (one country of a big list checks in minutes).
@@ -423,12 +415,6 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
                 }
             }
     } }
-
-    if (guide) {
-        LiveGuide(all, now, guideVersion, scope, healthVersion = healthVersion, onCards = { guide = false }, onRefresh = onRefresh,
-            onSources = { ProfileUi.guarded { if (wide) Nav.select(Tab.MORE) else Nav.open(Screen.SettingsPage(Section.LIVETV.name)) } })
-        return
-    }
 
     // On now, Starting soon and Tonight: programmes from the guide on the channels showing.
     val listings = remember(shown, now, guideVersion) { LiveListings.of(shown, now) }

@@ -51,7 +51,7 @@ object LiveTv {
         val country: String? = null, val number: Int = 0,
         /** Marked in the playlist as playing only in its own country (Free-TV's Ⓖ, iptv-org's "[Geo-blocked]"). */
         val regionLocked: Boolean = false,
-        /** Languages the playlist gives (tvg-language="Hindi;English"); see [languagesOf] for iptv-org's too. */
+        /** Languages the playlist gives (tvg-language="Hindi;English"). */
         val languages: List<String> = emptyList(),
     ) {
         /** Every group the playlist puts it in: group-title="Animation;Kids" is in both. */
@@ -323,53 +323,6 @@ object LiveTv {
             return if (bytes.size > 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()) GZIPInputStream(bytes.inputStream()).readBytes().decodeToString() else bytes.decodeToString()
         }
     }
-
-    // ---------- languages (the TV guide's Language filter) ----------
-
-    /** iptv-org's whole list grouped by language: each stream's languages, by its address. */
-    private const val LANGUAGE_LIST = "https://iptv-org.github.io/iptv/index.language.m3u"
-    @Volatile private var languageIndex: Map<String, List<String>> = emptyMap()
-    private val languageFile get() = File(App.context.filesDir, "livetv_languages.tsv")
-
-    /** A channel's languages: the playlist's own, else iptv-org's for the same stream ("Undefined" left out). */
-    fun languagesOf(c: Channel): List<String> = c.languages.ifEmpty { languageIndex[c.url].orEmpty() }
-
-    /** Loads iptv-org's language list (kept for a day; works offline from the copy). */
-    suspend fun loadLanguages() = withContext(Dispatchers.IO) {
-        val f = languageFile
-        if (languageIndex.isEmpty() && f.isFile) languageIndex = runCatching { parseLanguageTsv(f.readText()) }.getOrDefault(emptyMap())
-        if (f.isFile && System.currentTimeMillis() - f.lastModified() < 24 * 3600_000L) return@withContext
-        runCatching {
-            val map = parseLanguageM3u(text(LANGUAGE_LIST))
-            if (map.isNotEmpty()) {
-                languageIndex = map
-                f.writeText(map.entries.joinToString("\n") { (u, l) -> u + "\t" + l.joinToString(";") })
-                changed()
-            }
-        }.onFailure { android.util.Log.w("livetv", "languages: $it") }
-    }
-
-    /** index.language.m3u: a stream is listed once per language, its group-title the language's name. */
-    internal fun parseLanguageM3u(text: String): Map<String, List<String>> {
-        val out = HashMap<String, MutableList<String>>()
-        var lang: String? = null
-        for (raw in text.lineSequence()) {
-            val line = raw.trim()
-            when {
-                line.startsWith("#EXTINF", true) -> lang = Regex("group-title=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?.trim()
-                line.isEmpty() || line.startsWith("#") -> Unit
-                else -> {
-                    val l = lang
-                    if (l != null && l.isNotEmpty() && !l.equals("Undefined", true)) out.getOrPut(line) { mutableListOf() }.let { if (l !in it) it += l }
-                    lang = null
-                }
-            }
-        }
-        return out
-    }
-
-    private fun parseLanguageTsv(text: String): Map<String, List<String>> =
-        text.lineSequence().mapNotNull { l -> l.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1].split(';') } }.toMap()
 
     private val circledLetters = Regex("[\\u24B6-\\u24E9]")
     private val brokenChrome = Regex("like Gecko\\) Chrome/(\\d+)")
