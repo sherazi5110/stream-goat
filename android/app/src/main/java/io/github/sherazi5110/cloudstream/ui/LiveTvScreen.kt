@@ -227,7 +227,7 @@ fun LiveTvScreen() {
         all.isEmpty() && !App.online() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             OfflineState { force = true; version++ }
         }
-        else -> LiveContent(all, now, guideVersion, scope, LiveTv.sources().firstOrNull { it.id == sourceId }?.name ?: "All sources",
+        else -> LiveContent(remember(all, version) { LiveTv.hidden().let { h -> if (h.isEmpty()) all else all.filter { it.key !in h } } }, now, guideVersion, scope, LiveTv.sources().firstOrNull { it.id == sourceId }?.name ?: "All sources",
             onSources = { pickingSource = true }) { force = true; version++ }
     }
     if (pickingSource) SimpleDialog("Live TV sources", { pickingSource = false }) {
@@ -242,6 +242,8 @@ fun LiveTvScreen() {
         }
         row("All sources", null, sourceId == null) { sourceId = null }
         LiveTv.sources().filter { it.enabled }.forEach { s -> row(s.name, s.kind.label, s.id == sourceId) { sourceId = s.id } }
+        val hiddenCount = remember(version) { LiveTv.hidden().size }
+        if (hiddenCount > 0) row("Show $hiddenCount hidden channel${if (hiddenCount == 1) "" else "s"} again", null, false) { LiveTv.unhideAll() }
         row("Refresh channels and guide", null, false) { force = true; version++ }
         row("Live TV sources…", null, false) { ProfileUi.guarded { if (isWideNow) Nav.select(Tab.MORE) else Nav.open(Screen.SettingsPage(Section.LIVETV.name)) } }
     }
@@ -255,11 +257,19 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     isWideNow = wide
     var favVersion by remember { mutableIntStateOf(0) }
     val favourites = remember(favVersion) { LiveTv.favourites() }
-    // Holding a channel down (or a long OK on the remote) adds it to the favourites, or takes it out.
-    fun holdFavourite(c: LiveTv.Channel) {
-        val adding = c.key !in favourites
-        LiveTv.toggleFavourite(c); favVersion++
-        App.toast(if (adding) "★ ${c.name} added to favourites" else "${c.name} removed from favourites")
+    // Holding a channel down (or a long OK on the remote) opens its menu: favourites, hide.
+    var menuFor by remember { mutableStateOf<LiveTv.Channel?>(null) }
+    fun holdFavourite(c: LiveTv.Channel) { menuFor = c }
+    menuFor?.let { c ->
+        ChannelMenu(c, c.key in favourites, onClose = { menuFor = null },
+            onFavourite = {
+                val adding = c.key !in favourites
+                LiveTv.toggleFavourite(c); favVersion++
+                App.toast(if (adding) "★ ${c.name} added to favourites" else "${c.name} removed from favourites")
+            },
+            onHide = { LiveTv.hide(c); App.toast("${c.name} hidden: Sources ▾ shows hidden channels again") }) {
+            item("▶  Watch") { LivePlayback.play(scope, c, all) }
+        }
     }
     val recentKeys = remember(favVersion) { LiveTv.recent() }
     // A channel in several groups ("Animation;Kids") is under each of them.
@@ -504,6 +514,32 @@ private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus
                 style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (dead) Palette.muted else Color.Unspecified)
             if (cur != null) ProgressLine(progressOf(cur, now), Modifier.padding(top = 6.dp))
         }
+    }
+}
+
+/**
+ * A channel's menu (hold it down, or the remote's Menu key): favourites, hide, and [more] entries. A long OK opens it,
+ * so letting go of that OK doesn't pick the first entry (freshOkOnly).
+ */
+@Composable
+fun ChannelMenu(c: LiveTv.Channel, favourite: Boolean, onClose: () -> Unit, onFavourite: () -> Unit, onHide: () -> Unit,
+                more: @Composable ChannelMenuScope.() -> Unit = {}) {
+    SimpleDialog(c.name, onClose) {
+        Column(Modifier.freshOkOnly()) {
+            val scope = ChannelMenuScope(onClose)
+            scope.item(if (favourite) "★  Remove from favourites" else "☆  Add to favourites", onFavourite)
+            scope.item("⊘  Hide channel", onHide)
+            scope.more()
+        }
+    }
+}
+
+class ChannelMenuScope(private val close: () -> Unit) {
+    @Composable
+    fun item(label: String, action: () -> Unit) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            .card(RoundedCornerShape(10.dp)) { close(); action() }.background(Palette.surfaceHigh, RoundedCornerShape(10.dp))
+            .padding(horizontal = 14.dp, vertical = 11.dp))
     }
 }
 

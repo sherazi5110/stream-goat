@@ -882,6 +882,19 @@ object LiveTv {
         return added
     }
 
+    /** Channels hidden from the lists and the guide (a channel's menu: Hide channel). */
+    fun hidden(): Set<String> = keys("hidden").toSet()
+
+    fun hide(c: Channel) {
+        mine.edit().putString("hidden", JSONArray((hidden() + c.key).toList()).toString()).apply()
+        changed()
+    }
+
+    fun unhideAll() {
+        mine.edit().remove("hidden").apply()
+        changed()
+    }
+
     fun watched(c: Channel) {
         val list = (listOf(c.key) + recent().filterNot { it == c.key }).take(30)
         mine.edit().putString("recent", JSONArray(list).toString()).apply()

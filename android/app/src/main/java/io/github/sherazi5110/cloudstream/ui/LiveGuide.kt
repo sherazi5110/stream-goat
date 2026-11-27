@@ -187,15 +187,9 @@ internal fun LiveGuide(
     }
 
     menuFor?.let { c ->
-        val fav = c.key in favs
-        SimpleDialog(c.name, { menuFor = null }) {
-            @Composable
-            fun item(label: String, action: () -> Unit) {
-                Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    .card(RoundedCornerShape(10.dp)) { menuFor = null; action() }.background(Palette.surfaceHigh, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 14.dp, vertical = 11.dp))
-            }
-            item(if (fav) "★  Remove from favourites" else "☆  Add to favourites") { LiveTv.toggleFavourite(c); favVersion++ }
+        ChannelMenu(c, c.key in favs, onClose = { menuFor = null },
+            onFavourite = { LiveTv.toggleFavourite(c); favVersion++ },
+            onHide = { LiveTv.hide(c); io.github.sherazi5110.cloudstream.App.toast("${c.name} hidden: Sources ▾ shows hidden channels again") }) {
             item("▶  Watch full screen") { LivePlayback.play(scope, c, rows) }
             item("⇄  Try another link") { LivePlayback.play(scope, c, rows, chooseSource = true) }
             c.groups.firstOrNull()?.let { g -> item("☰  More in $g") { choice = choice.copy(category = g); Settings.liveCategory = g } }
