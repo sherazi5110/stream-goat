@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +67,19 @@ fun WebPlayerScreen(screen: Screen.WebPlayer) {
     var failed by remember(c.key) { mutableStateOf(false) }
     var web by remember { mutableStateOf<WebView?>(null) }
     BackHandler { Nav.back() }
+    // Full screen, as the video player: the status bar hid the YouTube player's settings and captions buttons.
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(Unit) {
+        val window = (view.context as? android.app.Activity)?.window
+        val bars = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        bars?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        bars?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        view.keepScreenOn = true
+        onDispose {
+            bars?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            view.keepScreenOn = false
+        }
+    }
 
     fun openOutside() {
         runCatching {
@@ -83,7 +98,8 @@ fun WebPlayerScreen(screen: Screen.WebPlayer) {
         view.loadDataWithBaseURL(PAGE_URL, html, "text/html", "utf-8", null)
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // Clear of a camera notch, so the player's corner buttons can be touched.
+    Box(Modifier.fillMaxSize().background(Color.Black).windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.displayCutout)) {
         val created = remember(c.key) {
             runCatching {
                 WebView(App.context).apply {
