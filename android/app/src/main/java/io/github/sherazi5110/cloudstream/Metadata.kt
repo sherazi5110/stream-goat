@@ -332,26 +332,6 @@ object Metadata {
         hit?.optString("imdb_id")?.ifBlank { hit.optString("id") }?.takeIf { it.startsWith("tt") }?.let { Triple(null, it, movie) }
     }
 
-    /**
-     * Wide artwork for a poster card (Settings → Appearance → Posters → Wide): TMDB's backdrop of the title (the same
-     * cached search as [posterIds]), else Cinemeta's background for an IMDb id. Null when there's none.
-     */
-    suspend fun backdrop(item: SearchResponse): String? = withContext(Dispatchers.IO) {
-        val imdbInUrl = Regex("tt\\d{5,}").find(item.url)?.value
-        if (hasTmdb) {
-            val hit = if (imdbInUrl != null) cached(cacheKey("find", imdbInUrl)) { findByImdb(imdbInUrl) }
-            else {
-                val kind = kindOf(item.type)
-                val (title, year) = cleanTitle(item.name)
-                val y = year ?: (item as? com.lagradost.cloudstream3.MovieSearchResponse)?.year ?: (item as? com.lagradost.cloudstream3.TvSeriesSearchResponse)?.year
-                cached(cacheKey("search", title, y, kind, language)) { searchTmdb(title, y, kind) }
-            }
-            image(hit?.optString("backdrop_path"), "w780")?.let { return@withContext it }
-        }
-        val imdb = imdbInUrl ?: runCatching { posterIds(item) }.getOrNull()?.second
-        imdb?.let { "https://images.metahub.space/background/medium/$it/img" }
-    }
-
     /** A show's aired episodes (seasons 1+): episodes per season, the latest aired one and its date. */
     data class Aired(val seasons: Map<Int, Int>, val lastSeason: Int, val lastEpisode: Int, val lastAirDate: String?)
 

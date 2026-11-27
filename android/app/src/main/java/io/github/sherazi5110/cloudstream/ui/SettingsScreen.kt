@@ -283,7 +283,7 @@ private fun AppearanceSection() {
     ChoiceChips(listOf("PORTRAIT", "LANDSCAPE"), { if (it == "PORTRAIT") "Tall (portrait)" else "Wide (landscape)" }, { it == shape }) {
         shape = it; io.github.sherazi5110.cloudstream.Settings.posterShape = it
     }
-    Hint("Wide shows each title's wide artwork (from TMDB when it's on in Metadata, else Cinemeta); a title without one shows its whole poster.")
+    Hint("Wide shows each extension's picture whole: a wide one fills the card, a tall one sits in the middle.")
 
     Heading("Pictures")
     var lowRes by remember { mutableStateOf(Settings.lowResImages) }

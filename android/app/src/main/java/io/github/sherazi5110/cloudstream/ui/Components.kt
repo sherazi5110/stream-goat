@@ -341,22 +341,15 @@ fun PosterCard(
 }
 
 /**
- * A wide card's picture: the title's wide artwork ([io.github.sherazi5110.cloudstream.Metadata.backdrop]); until it
- * arrives, or when there's none, the whole tall poster in the middle over a blurred, dimmed copy of itself.
+ * A wide card's picture: the extension's own picture, whole (a wide one fills the card, a tall one sits in the middle),
+ * over a blurred, dimmed copy of itself. Nothing is looked up elsewhere, so it loads as fast as a tall poster.
  */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.WideArt(item: SearchResponse) {
-    val art by androidx.compose.runtime.produceState<String?>(null, item.url) {
-        value = runCatching { io.github.sherazi5110.cloudstream.Metadata.backdrop(item) }.getOrNull()
-    }
-    val url = art
-    if (url != null) NetImage(url, Modifier.fillMaxSize())
-    else {
-        NetImage(item.posterUrl, Modifier.fillMaxSize().blur(18.dp), item.posterHeaders)
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
-        NetImage(item.posterUrl, Modifier.fillMaxSize().aspectRatio(2f / 3f, matchHeightConstraintsFirst = true).align(Alignment.Center), item.posterHeaders,
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-    }
+private fun WideArt(item: SearchResponse) {
+    // TVs skip the blur (a blur per card is heavy for a TV box's graphics); the copy is dimmed more instead.
+    NetImage(item.posterUrl, Modifier.fillMaxSize().then(if (isTv) Modifier else Modifier.blur(18.dp)), item.posterHeaders)
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (isTv) 0.6f else 0.35f)))
+    NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders, contentScale = androidx.compose.ui.layout.ContentScale.Fit, placeholder = false)
 }
 
 /** A Continue Watching card: wide artwork, title, what's left, and a progress bar. */
