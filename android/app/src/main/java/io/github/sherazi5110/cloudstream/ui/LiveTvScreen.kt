@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.allowHardware
+import androidx.compose.foundation.layout.fillMaxHeight
 import io.github.sherazi5110.cloudstream.App
 import io.github.sherazi5110.cloudstream.ChannelLogos
 import io.github.sherazi5110.cloudstream.Engine
@@ -117,13 +119,59 @@ object LivePlayback {
 /** The channel's logo (playlist, else iptv-org), over its initials so a missing logo still looks right. */
 @Composable
 fun ChannelLogo(c: LiveTv.Channel, size: androidx.compose.ui.unit.Dp) {
-    val logo by produceState(c.logo, c.key) { value = runCatching { ChannelLogos.candidates(c).firstOrNull() }.getOrNull() ?: c.logo }
+    val logo = rememberLogo(c)
     val hue = (c.name.hashCode() and 0xffffff).let { Color(0xFF000000 or it.toLong()).copy(alpha = 1f) }
     Box(Modifier.size(size).background(hue.copy(red = hue.red * 0.6f, green = hue.green * 0.6f, blue = hue.blue * 0.6f), RoundedCornerShape(size * 0.2f)),
         contentAlignment = Alignment.Center) {
         Text(c.name.filter { it.isLetterOrDigit() }.take(3).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.28f).sp)
-        if (logo != null) AsyncImage(logo, c.name, contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize().background(Color(0xFF1B1B22), RoundedCornerShape(size * 0.2f)).padding(size * 0.12f))
+        if (logo != null) LogoImage(logo, c.name, Modifier.fillMaxSize(), RoundedCornerShape(size * 0.2f), size * 0.12f)
+    }
+}
+
+@Composable
+private fun rememberLogo(c: LiveTv.Channel): String? =
+    produceState(c.logo, c.key) { value = runCatching { ChannelLogos.candidates(c).firstOrNull() }.getOrNull() ?: c.logo }.value
+
+/**
+ * A logo on a background that shows it: light behind a dark logo (Bloomberg's black letters vanished on the dark
+ * tile), dark behind a white one. Decided from the picture's own pixels, once per logo.
+ */
+@Composable
+private fun LogoImage(url: String, name: String, modifier: Modifier, shape: androidx.compose.ui.graphics.Shape, pad: androidx.compose.ui.unit.Dp) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var dark by remember(url) { mutableStateOf(LogoTone.known[url]) }
+    val request = remember(url) { coil3.request.ImageRequest.Builder(ctx).data(url).allowHardware(false).build() }
+    val bg = when (dark) { true -> Color(0xFFEDEDF2); false -> Color(0xFF1B1B22); null -> Color.Transparent }
+    AsyncImage(request, name, contentScale = ContentScale.Fit,
+        onSuccess = { st -> if (dark == null) dark = LogoTone.isDark(url, st.result.image) },
+        modifier = modifier.background(bg, shape).padding(pad))
+}
+
+/** Whether a logo is mostly dark (needs a light background); remembered per address. */
+internal object LogoTone {
+    val known = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    fun isDark(url: String, image: coil3.Image): Boolean = known.getOrPut(url) {
+        runCatching {
+            val bmp = (image as? coil3.BitmapImage)?.bitmap ?: return@runCatching false
+            val small = android.graphics.Bitmap.createScaledBitmap(bmp.copy(android.graphics.Bitmap.Config.ARGB_8888, false), 24, 24, true)
+            val px = IntArray(24 * 24).also { small.getPixels(it, 0, 24, 0, 0, 24, 24) }
+            darkPixels(px)
+        }.getOrDefault(false)
+    }
+
+    /** Mostly dark over its visible pixels (a transparent background doesn't count); an opaque picture keeps the dark tile. */
+    fun darkPixels(argb: IntArray): Boolean {
+        var seen = 0; var light = 0.0; var opaqueAll = true
+        for (p in argb) {
+            val a = (p ushr 24) and 0xff
+            if (a < 200) { opaqueAll = false; if (a < 60) continue }
+            val l = (0.2126 * ((p shr 16) and 0xff) + 0.7152 * ((p shr 8) and 0xff) + 0.0722 * (p and 0xff)) / 255
+            light += l; seen++
+        }
+        // A full picture (a photo or a logo on its own background) already shows; only see-through logos need help.
+        if (opaqueAll || seen == 0) return false
+        return light / seen < 0.42
     }
 }
 
@@ -266,8 +314,9 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     var selected by remember { mutableStateOf<LiveTv.Channel?>(null) }
     val banner = selected ?: recent.firstOrNull() ?: shown.firstOrNull()
     val edge = if (wide) 40.dp else 16.dp
-    // A TV opens straight into the TV guide (TiviMate-style, with a live preview); phones and tablets get the cards.
-    var guide by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(isTv) }
+    // A TV or a tablet opens straight into the TV guide (TiviMate-style, with a live preview); phones get the cards.
+    val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
+    var guide by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(isTv || tablet) }
 
     val toolbar: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -436,7 +485,7 @@ private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus
         .background(Palette.surface, RoundedCornerShape(12.dp))) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 8f).background(Brush.linearGradient(listOf(Palette.surfaceHigh, Palette.accent.copy(alpha = 0.18f)))),
             contentAlignment = Alignment.Center) {
-            ChannelLogo(c, 58.dp)
+            CardLogo(c, Modifier.fillMaxWidth(0.62f).fillMaxHeight(0.62f))
             LiveBadge(Modifier.align(Alignment.TopStart).padding(8.dp), LiveTv.webPage(c)?.let { "LIVE · ${it.uppercase()}" } ?: "LIVE")
             if (c.regionLocked) RegionBadge(Modifier.align(Alignment.BottomStart).padding(8.dp))
         }
@@ -447,6 +496,14 @@ private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus
             if (cur != null) ProgressLine(progressOf(cur, now), Modifier.padding(top = 6.dp))
         }
     }
+}
+
+/** A card's logo: as large as the card allows, else the channel's initials. */
+@Composable
+private fun CardLogo(c: LiveTv.Channel, modifier: Modifier) {
+    val logo = rememberLogo(c)
+    if (logo != null) LogoImage(logo, c.name, modifier, RoundedCornerShape(10.dp), 8.dp)
+    else Text(c.name.filter { it.isLetterOrDigit() }.take(4).uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = 26.sp)
 }
 
 /** The guide's rows: what's on now, what starts in the next hour, and this evening (19:00 to midnight). */
