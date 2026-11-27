@@ -36,8 +36,11 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.pressKey
@@ -452,5 +455,38 @@ class FocusTest {
         check(backs == 1) { "Back on a poster row was swallowed" }
         focus("music"); backKey()
         check(backs == 2) { "Back in the side bar was swallowed" }
+    }
+
+    @Test fun `a mouse click on a row's arrow doesn't send the page back to the top`() {
+        val page = androidx.compose.foundation.lazy.LazyListState()
+        rule.setContent {
+            FocusKeeperRoot { keeper ->
+                androidx.compose.foundation.lazy.LazyColumn(keeper.size(600.dp, 400.dp), state = page) {
+                    items((0 until 12).toList(), key = { it }) { r ->
+                        TvRowScroll { state ->
+                            LazyRow(state = state, modifier = Modifier.width(600.dp).testTag("row$r")) {
+                                items((0 until 20).toList(), key = { it }) { c -> Card("r${r}c$c", w = 120) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.runOnIdle { kotlinx.coroutines.runBlocking { page.scrollToItem(6) } }
+        settle()
+        val before = page.firstVisibleItemIndex
+        // The mouse clicks a card (selects it), then the row's › arrow, a few times (the card goes off screen).
+        tag("r6c0").performMouseInput { moveTo(center); click(center) }
+        settle()
+        repeat(3) {
+            tag("row6").performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(width - 30f, height / 2f)) }
+            settle()
+            rule.onAllNodes(hasContentDescription("Forward"))[0].performMouseInput { moveTo(center); click(center) }
+            settle()
+        }
+        rule.mainClock.advanceTimeBy(2_000); settle()
+        check(rule.onAllNodesWithTag("r6c0").fetchSemanticsNodes().isEmpty()) { "the arrow didn't move the row" }
+        check(page.firstVisibleItemIndex >= before) { "the page jumped from row $before to row ${page.firstVisibleItemIndex}" }
+        check(runCatching { tag("r0c0").assertIsFocused() }.isFailure) { "the selection jumped to the first row" }
     }
 }

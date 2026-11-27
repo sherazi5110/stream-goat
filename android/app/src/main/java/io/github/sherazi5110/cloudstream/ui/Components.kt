@@ -214,10 +214,12 @@ fun TvRowScroll(
                     Modifier.align(align).padding(horizontal = 6.dp).size(52.dp)
                         .background(Color.Black.copy(alpha = 0.62f), CircleShape)
                         .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                        // Before clickable, so it applies to the arrow itself: a click never selects it (when it
+                        // vanished at the row's end the selection had nowhere to stay).
+                        .focusProperties { canFocus = false }
                         .clickable(interactionSource = null, indication = null) {
                             scope.launch { state.animateScrollBy(if (forward) step else -step) }
-                        }
-                        .focusProperties { canFocus = false },
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(if (forward) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.KeyboardArrowLeft,

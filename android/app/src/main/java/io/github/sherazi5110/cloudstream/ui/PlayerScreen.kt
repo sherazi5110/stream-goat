@@ -294,9 +294,9 @@ fun PlayerScreen(screen: Screen.Player) {
         if (!c.started) {
             LoadingOverlay(c, onChoose = { c.stopAutoPlay(); sheet = Sheet.SOURCES })
         } else {
-            if (!isTv) Gestures(locked, onTap = { controls = !controls; poke++ }, onSeek = { c.seekBy(it); poke++ }, onPinch = { pinch = (pinch * it).coerceIn(1f, 4f) })
-            // TV with a mouse: a click on the picture shows the controls (and settings buttons), another hides them.
-            else Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { controls = !controls; poke++ } })
+            // On a TV too: a remote sends no pointer events, but a mouse (an air mouse) then works as on a phone:
+            // click for the controls, double-click ±10 s, hold and drag for volume and brightness, the wheel for volume.
+            Gestures(locked, onTap = { controls = !controls; poke++ }, onSeek = { c.seekBy(it); poke++ }, onPinch = { pinch = (pinch * it).coerceIn(1f, 4f) })
             if (c.buffering && c.error == null) Spinner(Modifier.fillMaxSize())
             if (c.slowWarning && c.error == null) {
                 Row(Modifier.align(Alignment.TopCenter).padding(top = 72.dp).widthIn(max = 640.dp)
@@ -393,7 +393,7 @@ private fun NextEpisodeCard(c: PlayerController, left: Int, modifier: Modifier, 
     }
 }
 
-/** Swipes, taps and pinch on phones: left side brightness, right side volume, double-tap ±10 s. */
+/** Swipes, taps and pinch on phones (and a mouse): left side brightness, right side volume, double-tap ±10 s; a mouse wheel: volume. */
 @Composable
 private fun Gestures(locked: Boolean, onTap: () -> Unit, onSeek: (Long) -> Unit, onPinch: (Float) -> Unit) {
     val context = LocalContext.current
@@ -410,6 +410,21 @@ private fun Gestures(locked: Boolean, onTap: () -> Unit, onSeek: (Long) -> Unit,
                 onTap = { onTap() },
                 onDoubleTap = { p -> if (!locked) { val ms = if (p.x < size.width / 2) -10_000L else 10_000L; onSeek(ms); seekFlash = ms } },
             )
+        }
+        .pointerInput(locked) {
+            if (locked) return@pointerInput
+            // The mouse wheel: one volume step per notch, up for louder.
+            awaitPointerEventScope {
+                while (true) {
+                    val e = awaitPointerEvent()
+                    if (e.type != androidx.compose.ui.input.pointer.PointerEventType.Scroll) continue
+                    val dy = e.changes.sumOf { it.scrollDelta.y.toDouble() }
+                    if (dy == 0.0) continue
+                    audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, if (dy < 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, 0)
+                    indicator = false to audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    e.changes.forEach { it.consume() }
+                }
+            }
         }
         .pointerInput(locked) {
             if (locked) return@pointerInput
