@@ -278,12 +278,6 @@ private fun AppearanceSection() {
         music = it; io.github.sherazi5110.cloudstream.Settings.showMusic = it
         if (!it && Nav.tab == Tab.MUSIC) Nav.select(Tab.HOME)
     }
-    Heading("Posters")
-    var shape by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.posterShape) }
-    ChoiceChips(listOf("PORTRAIT", "LANDSCAPE"), { if (it == "PORTRAIT") "Tall (portrait)" else "Wide (landscape)" }, { it == shape }) {
-        shape = it; io.github.sherazi5110.cloudstream.Settings.posterShape = it
-    }
-    Hint("Wide shows each extension's picture whole: a wide one fills the card, a tall one sits in the middle.")
 
     Heading("Pictures")
     var lowRes by remember { mutableStateOf(Settings.lowResImages) }

@@ -259,12 +259,6 @@ object Settings {
         get() = string("show_music", "true").toBoolean()
         set(v) = put("show_music", v.toString())
 
-    /** Settings → Appearance → Posters: "PORTRAIT" (tall, as the extensions give them) or "LANDSCAPE" (wide). */
-    var posterShape: String
-        get() = string("poster_shape", "PORTRAIT")
-        set(v) = put("poster_shape", v)
-    val widePosters: Boolean get() = posterShape == "LANDSCAPE"
-
     var askEngine: Boolean
         get() = string("ask_engine", "false").toBoolean()
         set(v) = put("ask_engine", v.toString())

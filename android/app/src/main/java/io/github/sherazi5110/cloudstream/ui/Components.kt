@@ -2,7 +2,6 @@ package io.github.sherazi5110.cloudstream.ui
 
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.input.pointer.pointerInput
@@ -314,11 +313,9 @@ fun PosterCard(
     // Hidden titles (long-press → Hide) don't show anywhere a poster is listed.
     if (io.github.sherazi5110.cloudstream.Hidden.isHidden(item.url)) return
     var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    // Settings → Appearance → Posters: wide cards (about the same height as a tall poster's two thirds).
-    val wide = io.github.sherazi5110.cloudstream.Settings.widePosters
-    Column(modifier.width(if (wide) width * 1.6f else width)) {
+    Column(modifier.width(width)) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(if (wide) 16f / 9f else 2f / 3f)
+            Modifier.fillMaxWidth().aspectRatio(2f / 3f)
                 .card(onFocus = onFocus, onLongClick = onLongClick ?: { menu = true }, selectFirst = true, onClick = onClick)
         ) {
             androidx.compose.material3.DropdownMenu(menu, { menu = false }, Modifier.freshOkOnly()) {
@@ -328,7 +325,7 @@ fun PosterCard(
                     io.github.sherazi5110.cloudstream.App.toast("Hidden. Restore it in Settings → Profiles → Hidden titles")
                 })
             }
-            if (wide) WideArt(item) else NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders)
+            NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders)
             item.scoreText()?.let { ScoreBadge(it, Modifier.align(Alignment.TopStart).padding(6.dp)) }
             WatchedStamp(item)
             PosterRating(item, Modifier.align(Alignment.BottomStart).padding(6.dp))
@@ -338,18 +335,6 @@ fun PosterCard(
             modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
         )
     }
-}
-
-/**
- * A wide card's picture: the extension's own picture, whole (a wide one fills the card, a tall one sits in the middle),
- * over a blurred, dimmed copy of itself. Nothing is looked up elsewhere, so it loads as fast as a tall poster.
- */
-@Composable
-private fun WideArt(item: SearchResponse) {
-    // TVs skip the blur (a blur per card is heavy for a TV box's graphics); the copy is dimmed more instead.
-    NetImage(item.posterUrl, Modifier.fillMaxSize().then(if (isTv) Modifier else Modifier.blur(18.dp)), item.posterHeaders)
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (isTv) 0.6f else 0.35f)))
-    NetImage(item.posterUrl, Modifier.fillMaxSize(), item.posterHeaders, contentScale = androidx.compose.ui.layout.ContentScale.Fit, placeholder = false)
 }
 
 /** A Continue Watching card: wide artwork, title, what's left, and a progress bar. */
