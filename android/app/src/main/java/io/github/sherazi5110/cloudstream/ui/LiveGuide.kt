@@ -177,7 +177,7 @@ internal fun LiveGuide(
             if (wide) LivePreview(sel, Modifier.width(if (isTv) 360.dp else 300.dp))
         }
         when {
-            rows.isEmpty() -> EmptyState("No channels", if (used.category == LiveFilters.FAV) "No favourites yet: press Menu on a channel to add it."
+            rows.isEmpty() -> EmptyState("No channels", if (used.category == LiveFilters.FAV) "No favourites yet: hold a channel down (or press Menu on it) to add it."
                 else "Nothing for this choice. Pick another country, category or language at the top.", Modifier.fillMaxWidth())
             else -> GuideGrid(rows, now, guideVersion, wide, onPlay = { LivePlayback.play(scope, it, rows) }, modifier = Modifier.weight(1f),
                 numbers = numbers, startKey = start?.key,

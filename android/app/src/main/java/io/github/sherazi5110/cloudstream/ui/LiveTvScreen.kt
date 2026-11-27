@@ -255,6 +255,12 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     isWideNow = wide
     var favVersion by remember { mutableIntStateOf(0) }
     val favourites = remember(favVersion) { LiveTv.favourites() }
+    // Holding a channel down (or a long OK on the remote) adds it to the favourites, or takes it out.
+    fun holdFavourite(c: LiveTv.Channel) {
+        val adding = c.key !in favourites
+        LiveTv.toggleFavourite(c); favVersion++
+        App.toast(if (adding) "★ ${c.name} added to favourites" else "${c.name} removed from favourites")
+    }
     val recentKeys = remember(favVersion) { LiveTv.recent() }
     // A channel in several groups ("Animation;Kids") is under each of them.
     val groups = remember(all) { all.flatMap { c -> c.groups.ifEmpty { listOf("Other") } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key } }
@@ -438,12 +444,12 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
         if (recent.isNotEmpty() && filter == "All" && query.isBlank()) {
             item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Recently watched", Modifier.padding(top = 8.dp)) }
             uniqueItems(recent.take(if (wide) 5 else 4), key = { "recent|" + it.key }) { c ->
-                ChannelCard(c, now, guideVersion + healthVersion, onFocus = { selected = c }) { LivePlayback.play(scope, c, all) }
+                ChannelCard(c, now, guideVersion + healthVersion, onFocus = { selected = c }, onLongClick = { holdFavourite(c) }) { LivePlayback.play(scope, c, all) }
             }
             item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle(if (filter == "All") "All channels" else filter, Modifier.padding(top = 8.dp)) }
         }
         uniqueItems(shown, key = { it.key }) { c ->
-            ChannelCard(c, now, guideVersion + healthVersion, onFocus = { selected = c }) { LivePlayback.play(scope, c, shown) }
+            ChannelCard(c, now, guideVersion + healthVersion, onFocus = { selected = c }, onLongClick = { holdFavourite(c) }) { LivePlayback.play(scope, c, shown) }
         }
         if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
             EmptyState("No channels", if (query.isNotBlank()) "Nothing matches \"$query\"." else "This list is empty.", Modifier.fillMaxWidth())
@@ -480,11 +486,11 @@ private fun LiveBanner(c: LiveTv.Channel, number: Int, now: Long, guideVersion: 
 }
 
 @Composable
-private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus: () -> Unit, onClick: () -> Unit) {
+private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus: () -> Unit, onLongClick: () -> Unit, onClick: () -> Unit) {
     val cur = remember(c, now, guideVersion) { LiveTv.nowNext(c, now).first }
     val health = remember(c, guideVersion) { LiveTv.health(c) }
     val dead = health?.ok == false
-    Column(Modifier.fillMaxWidth().alpha(if (dead) 0.5f else 1f).card(RoundedCornerShape(12.dp), onFocus = onFocus, selectFirst = true, onClick = onClick)
+    Column(Modifier.fillMaxWidth().alpha(if (dead) 0.5f else 1f).card(RoundedCornerShape(12.dp), onFocus = onFocus, onLongClick = onLongClick, selectFirst = true, onClick = onClick)
         .background(Palette.surface, RoundedCornerShape(12.dp))) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 8f).background(Brush.linearGradient(listOf(Palette.surfaceHigh, Palette.accent.copy(alpha = 0.18f)))),
             contentAlignment = Alignment.Center) {
