@@ -75,7 +75,7 @@ import java.util.Date
 
 object LivePlayback {
     /** Opens a channel in the player; [list] lets CH+ / CH− move through the channels shown. */
-    fun play(scope: CoroutineScope, c: LiveTv.Channel, list: List<LiveTv.Channel>, replace: Boolean = false) {
+    fun play(scope: CoroutineScope, c: LiveTv.Channel, list: List<LiveTv.Channel>, replace: Boolean = false, chooseSource: Boolean = false) {
         LiveTv.watched(c)
         // A YouTube, Twitch or Dailymotion channel: plays in that service's own embed player, inside the app.
         if (LiveTv.webEmbed(c) != null) {
@@ -100,7 +100,7 @@ object LivePlayback {
                     api to (Engine.load(api, c.url) ?: error("The add-on returned nothing for ${c.name}"))
                 } else LiveApi to LiveApi.load(LiveApi.data(c))!!
                 val playable = Engine.playables(r).firstOrNull() ?: error("Nothing to play")
-                val screen = Screen.Player(api, r, playable, channels = list, channel = c)
+                val screen = Screen.Player(api, r, playable, chooseSource = chooseSource, channels = list, channel = c)
                 if (replace) Nav.replace(screen) else Nav.open(screen)
             }.onFailure { App.toast("Couldn't play ${c.name}: ${it.message ?: it}") }
         }
@@ -266,7 +266,8 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     var selected by remember { mutableStateOf<LiveTv.Channel?>(null) }
     val banner = selected ?: recent.firstOrNull() ?: shown.firstOrNull()
     val edge = if (wide) 40.dp else 16.dp
-    var guide by remember { mutableStateOf(false) }
+    // A TV opens straight into the TV guide (TiviMate-style, with a live preview); phones and tablets get the cards.
+    var guide by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(isTv) }
 
     val toolbar: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -349,20 +350,13 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     } }
 
     if (guide) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(start = edge, end = edge, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            toolbar()
-            chipRow()
-            val sorted = remember(shown, favourites) { shown.sortedByDescending { it.key in favourites } }
-            when {
-                !LiveTv.hasGuide() -> EmptyState("No TV guide yet",
-                    "None of your sources has a guide (XMLTV) loaded. Xtream logins include one; for an M3U playlist add its guide address in Settings → Live TV.",
-                    Modifier.fillMaxWidth(), button = "Refresh guide") { onRefresh() }
-                sorted.isEmpty() -> EmptyState("No channels", if (query.isNotBlank()) "Nothing matches \"$query\"." else "This list is empty.", Modifier.fillMaxWidth())
-                else -> GuideGrid(sorted, now, guideVersion, wide, onPlay = { LivePlayback.play(scope, it, sorted) }, modifier = Modifier.weight(1f))
-            }
-        }
+        LiveGuide(all, now, guideVersion, scope, healthVersion = healthVersion, onCards = { guide = false }, onRefresh = onRefresh,
+            onSources = { ProfileUi.guarded { if (wide) Nav.select(Tab.MORE) else Nav.open(Screen.SettingsPage(Section.LIVETV.name)) } })
         return
     }
+
+    // On now, Starting soon and Tonight: programmes from the guide on the channels showing.
+    val listings = remember(shown, now, guideVersion) { LiveListings.of(shown, now) }
 
     LazyVerticalGrid(
         if (wide) GridCells.Adaptive(220.dp) else GridCells.Adaptive(160.dp),
@@ -377,6 +371,18 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
         }
         item(span = { GridItemSpan(maxLineSpan) }) { toolbar() }
         item(span = { GridItemSpan(maxLineSpan) }) { chipRow() }
+        if (filter == "All" && query.isBlank()) listings.forEach { (title, items) ->
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    SectionTitle(title, Modifier.padding(top = 8.dp))
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                        uniqueItems(items, key = { "$title|${it.first.key}|${it.second.start}" }) { (c, p) ->
+                            ProgrammeCard(c, p, now, Modifier.width(if (wide) 260.dp else 200.dp)) { LivePlayback.play(scope, c, shown) }
+                        }
+                    }
+                }
+            }
+        }
         if (recent.isNotEmpty() && filter == "All" && query.isBlank()) {
             item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Recently watched", Modifier.padding(top = 8.dp)) }
             uniqueItems(recent.take(if (wide) 5 else 4), key = { "recent|" + it.key }) { c ->
@@ -440,5 +446,44 @@ private fun ChannelCard(c: LiveTv.Channel, now: Long, guideVersion: Int, onFocus
                 style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (dead) Palette.muted else Color.Unspecified)
             if (cur != null) ProgressLine(progressOf(cur, now), Modifier.padding(top = 6.dp))
         }
+    }
+}
+
+/** The guide's rows: what's on now, what starts in the next hour, and this evening (19:00 to midnight). */
+internal object LiveListings {
+    fun of(channels: List<LiveTv.Channel>, now: Long, max: Int = 20): List<Pair<String, List<Pair<LiveTv.Channel, LiveTv.Programme>>>> {
+        if (!LiveTv.hasGuide()) return emptyList()
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = now }
+        val evening = (cal.clone() as java.util.Calendar).apply { set(java.util.Calendar.HOUR_OF_DAY, 19); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
+        val midnight = (cal.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, 1); set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
+        val onNow = mutableListOf<Pair<LiveTv.Channel, LiveTv.Programme>>()
+        val soon = mutableListOf<Pair<LiveTv.Channel, LiveTv.Programme>>()
+        val tonight = mutableListOf<Pair<LiveTv.Channel, LiveTv.Programme>>()
+        for (c in channels) {
+            if (onNow.size >= max && soon.size >= max && tonight.size >= max) break
+            val progs = LiveTv.programmes(c, now, midnight)
+            progs.firstOrNull { now in it.start until it.stop }?.let { if (onNow.size < max) onNow += c to it }
+            progs.firstOrNull { it.start > now && it.start <= now + 3600_000L }?.let { if (soon.size < max) soon += c to it }
+            progs.firstOrNull { it.start >= maxOf(evening, now + 3600_000L) && it.start < midnight }?.let { if (tonight.size < max) tonight += c to it }
+        }
+        return listOf("On now" to onNow, "Starting soon" to soon.sortedBy { it.second.start }, "Tonight" to tonight.sortedBy { it.second.start })
+            .filter { it.second.isNotEmpty() }
+    }
+}
+
+/** One programme in the On now / Starting soon / Tonight rows: its title, the channel and the time. */
+@Composable
+private fun ProgrammeCard(c: LiveTv.Channel, p: LiveTv.Programme, now: Long, modifier: Modifier, onClick: () -> Unit) {
+    val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
+    val live = now in p.start until p.stop
+    Column(modifier.card(RoundedCornerShape(12.dp), selectFirst = true, onClick = onClick).background(Palette.surface, RoundedCornerShape(12.dp)).padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChannelLogo(c, 30.dp)
+            Text(c.name, style = MaterialTheme.typography.labelMedium, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(p.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        Text(if (live) "Now · ${((p.stop - now) / 60_000).coerceAtLeast(1)} min left" else time.format(Date(p.start)) + " – " + time.format(Date(p.stop)),
+            style = MaterialTheme.typography.bodySmall, color = Palette.muted)
+        if (live) ProgressLine(progressOf(p, now), Modifier.padding(top = 6.dp))
     }
 }

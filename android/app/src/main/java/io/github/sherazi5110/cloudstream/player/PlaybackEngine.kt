@@ -47,6 +47,8 @@ data class OpenRequest(
     val hdrSurface: Boolean,
     /** Subtitle files to show (ExoPlayer needs them when the source opens). */
     val subtitles: List<Uri> = emptyList(),
+    /** A Live TV channel: plays its sharpest quality (up to the screen's) from the start, not the lowest. */
+    val live: Boolean = false,
 )
 
 /**

@@ -202,8 +202,22 @@ fun PlayerScreen(screen: Screen.Player) {
     androidx.compose.runtime.SideEffect { FocusKeeper.paused = c.started && !controls && sheet == null }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { FocusKeeper.paused = false } }
 
+    // Live TV, full screen (like TiviMate): ← a see-through channel list over the picture, → or Info the channel's
+    // banner (now, next, quality), Menu the channel's menu. ↑/↓ change channel.
+    val liveChannels = screen.channels; val liveChannel = screen.channel
+    var liveList by remember(screen) { mutableStateOf(false) }
+    var liveMenu by remember(screen) { mutableStateOf(false) }
+    var bannerUntil by remember(screen) { mutableStateOf(if (liveChannel != null) System.currentTimeMillis() + 5000 else 0L) }
+    var bannerTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(bannerUntil) { val wait = bannerUntil - System.currentTimeMillis(); if (wait > 0) { delay(wait); bannerTick++ } }
+    val showBanner = { bannerUntil = System.currentTimeMillis() + 5000 }
+    // The channel list or menu closed: the picture takes the remote again (↑/↓ change channel, ← the list…).
+    LaunchedEffect(liveList, liveMenu) { if (liveChannel != null && !liveList && !liveMenu && !controls && sheet == null) { delay(50); runCatching { rootFocus.requestFocus() } } }
+
     BackHandler {
         when {
+            liveMenu -> liveMenu = false
+            liveList -> liveList = false
             sheet != null -> sheet = null
             countdownLeft > 0 -> countdownCancelled = true
             isTv && controls && c.started -> controls = false
@@ -233,10 +247,16 @@ fun PlayerScreen(screen: Screen.Player) {
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (!controls && sheet == null && countdownLeft > 0) { playNext(); true }
                         else if (!controls && sheet == null && c.activeSegment != null) { c.skipSegment(); true }
                         else if (!controls && c.started && sheet == null) { c.togglePause(); controls = true; true } else false
-                    KeyEvent.KEYCODE_DPAD_LEFT -> if (!controls && c.started && sheet == null) { c.seekBy(-10_000); true } else false
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> if (!controls && c.started && sheet == null) { c.seekBy(10_000); true } else false
-                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_MENU ->
-                        if (!controls && c.started && sheet == null) { controls = true; true } else false
+                    // Live TV with the picture alone on screen: the channel keys of a TV remote.
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> if (liveChannel != null && liveChannels != null && !controls && sheet == null && !liveList && !liveMenu) {
+                        zap(if (e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1)
+                    } else if (!controls && c.started && sheet == null && !liveList && !liveMenu) { controls = true; true } else false
+                    KeyEvent.KEYCODE_DPAD_LEFT -> if (liveChannel != null && liveChannels != null && !controls && sheet == null && !liveList && !liveMenu) { liveList = true; true }
+                        else if (!controls && c.started && sheet == null && !liveList && !liveMenu) { c.seekBy(-10_000); true } else false
+                    KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_INFO -> if (liveChannel != null && !controls && sheet == null && !liveList && !liveMenu) { showBanner(); true }
+                        else if (e.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && !controls && c.started && sheet == null && !liveList && !liveMenu) { c.seekBy(10_000); true } else false
+                    KeyEvent.KEYCODE_MENU -> if (liveChannel != null && sheet == null && !liveList) { liveMenu = true; true }
+                        else if (!controls && c.started && sheet == null) { controls = true; true } else false
                     else -> false
                 }
             }
@@ -316,6 +336,32 @@ fun PlayerScreen(screen: Screen.Player) {
             } else if (seg != null && !locked) {
                 PillButton(seg.kind.label + (if (isTv && !controls) "  (OK)" else ""), Icons.Filled.SkipNext,
                     Modifier.align(Alignment.BottomEnd).padding(end = 36.dp, bottom = 110.dp), primary = false) { c.skipSegment() }
+            }
+        }
+
+        if (liveChannel != null) {
+            bannerTick.let { }
+            if (!controls && sheet == null && !liveList && System.currentTimeMillis() < bannerUntil)
+                ChannelBanner(liveChannel, liveChannels, c.measured, Modifier.align(Alignment.BottomCenter))
+            if (liveList && liveChannels != null) LiveChannelList(liveChannels, liveChannel, Modifier.align(Alignment.CenterStart),
+                onPick = { ch -> liveList = false; if (ch.key != liveChannel.key) LivePlayback.play(scope, ch, liveChannels, replace = true) },
+                onClose = { liveList = false })
+            if (liveMenu) {
+                var fav by remember { mutableStateOf(liveChannel.key in io.github.sherazi5110.cloudstream.LiveTv.favourites()) }
+                SimpleDialog(liveChannel.name, { liveMenu = false }) {
+                    @Composable
+                    fun item(label: String, action: () -> Unit) {
+                        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            .card(RoundedCornerShape(10.dp)) { liveMenu = false; action() }.background(Palette.surfaceHigh, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 14.dp, vertical = 11.dp))
+                    }
+                    item(if (fav) "★  Remove from favourites" else "☆  Add to favourites") { fav = io.github.sherazi5110.cloudstream.LiveTv.toggleFavourite(liveChannel) }
+                    if (liveChannels != null) item("☰  Channel list") { liveList = true }
+                    item("ⓘ  What's on") { showBanner() }
+                    item("⇄  Try another link") { sheet = Sheet.SOURCES }
+                    item("CC  Subtitles") { sheet = Sheet.SUBTITLES }
+                    item("♪  Audio") { sheet = Sheet.AUDIO }
+                }
             }
         }
 
@@ -721,4 +767,62 @@ private fun inPip(): Boolean {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.ui.platform.LocalConfiguration.current  // read so this recomposes when the window changes
     return android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && ctx.findActivity()?.isInPictureInPictureMode == true
+}
+
+/** Live TV's banner: number, channel, what's on and next, time, progress, picture quality. Hides after 5 s. */
+@Composable
+private fun ChannelBanner(ch: io.github.sherazi5110.cloudstream.LiveTv.Channel, list: List<io.github.sherazi5110.cloudstream.LiveTv.Channel>?, quality: String?, modifier: Modifier) {
+    val now = System.currentTimeMillis()
+    val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
+    val (cur, next) = remember(ch) { io.github.sherazi5110.cloudstream.LiveTv.nowNext(ch, now) }
+    val number = list?.indexOfFirst { it.key == ch.key }?.takeIf { it >= 0 }?.plus(1)
+    Row(modifier.padding(24.dp).widthIn(max = 900.dp).fillMaxWidth().background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(16.dp)).padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        ChannelLogo(ch, 64.dp)
+        Column(Modifier.weight(1f)) {
+            Text(listOfNotNull(number?.toString(), ch.name).joinToString("   "), style = MaterialTheme.typography.titleSmall, color = Palette.muted, maxLines = 1)
+            Text(cur?.title ?: ch.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(quality, cur?.let { "${time.format(Date(it.start))} – ${time.format(Date(it.stop))}" } ?: time.format(Date(now)))
+                .joinToString("   ·   "), style = MaterialTheme.typography.bodySmall, color = Palette.muted)
+            cur?.let { ProgressLine(((now - it.start).toFloat() / (it.stop - it.start).coerceAtLeast(1)).coerceIn(0f, 1f), Modifier.widthIn(max = 300.dp).padding(vertical = 6.dp)) }
+            next?.let { Text("Next  ${time.format(Date(it.start))}  ${it.title}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+/** The see-through channel list over the picture (← while watching): OK switches channel, Back closes it. */
+@Composable
+private fun LiveChannelList(list: List<io.github.sherazi5110.cloudstream.LiveTv.Channel>, current: io.github.sherazi5110.cloudstream.LiveTv.Channel,
+                            modifier: Modifier, onPick: (io.github.sherazi5110.cloudstream.LiveTv.Channel) -> Unit, onClose: () -> Unit) {
+    val now = remember { System.currentTimeMillis() }
+    val start = remember { list.indexOfFirst { it.key == current.key }.coerceAtLeast(0) }
+    val state = androidx.compose.foundation.lazy.rememberLazyListState((start - 3).coerceAtLeast(0))
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+    FocusOverlay("channel list") { trap ->
+        Column(trap.then(modifier).fillMaxHeight().width(420.dp).background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.88f), Color.Black.copy(alpha = 0.55f))))
+            .padding(vertical = 16.dp)) {
+            Text("Channels", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
+            LazyColumn(state = state, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                items(list.size, key = { list[it].key }) { i ->
+                    val ch = list[i]
+                    val cur = remember(ch) { io.github.sherazi5110.cloudstream.LiveTv.nowNext(ch, now).first }
+                    Row(Modifier.fillMaxWidth().then(if (i == start) Modifier.focusRequester(first) else Modifier)
+                        .card(RoundedCornerShape(10.dp), focusScale = 1.02f) { onPick(ch) }
+                        .background(if (ch.key == current.key) Palette.accent.copy(alpha = 0.22f) else Color.Transparent, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("${i + 1}", style = MaterialTheme.typography.labelMedium, color = Palette.muted, modifier = Modifier.width(34.dp))
+                        ChannelLogo(ch, 32.dp)
+                        Column(Modifier.weight(1f)) {
+                            Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            cur?.let {
+                                Text(it.title, style = MaterialTheme.typography.bodySmall, color = Palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                ProgressLine(((now - it.start).toFloat() / (it.stop - it.start).coerceAtLeast(1)).coerceIn(0f, 1f), Modifier.padding(top = 4.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

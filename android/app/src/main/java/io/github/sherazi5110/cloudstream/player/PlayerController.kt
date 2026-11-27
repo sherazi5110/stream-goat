@@ -481,7 +481,7 @@ class PlayerController(
                 hls = hls || inline, dash = dash, softwareDecode = softwareDecode,
                 bufferAheadMs = ahead, startBufferMs = Settings.startBufferMs, bufferMemoryMb = bufferMemoryMb(),
                 levelAudio = Settings.levelAudio, passthrough = Settings.passthrough, volume = boost, rate = speed,
-                zoom = zoom, hdrSurface = hdrSurface,
+                zoom = zoom, hdrSurface = hdrSurface, live = isLive,
             ))
         }
         // A source that hasn't started after 25 s (dead host, endless redirect) gives way to the next one;

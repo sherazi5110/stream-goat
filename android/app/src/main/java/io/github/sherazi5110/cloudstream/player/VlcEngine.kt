@@ -53,6 +53,8 @@ class VlcEngine : PlaybackEngine {
             }
             if (r.startMs > 0) addOption(":start-time=${r.startMs / 1000.0}")
             addOption(":network-caching=${r.startBufferMs}")
+            // Live TV: the sharpest quality from the start (VLC's HLS otherwise starts low).
+            if (r.live) addOption(":adaptive-logic=highest")
             addOption(":adaptive-maxbuffer=${r.bufferAheadMs}")
             addOption(":prefetch-buffer-size=${r.bufferMemoryMb * 1024}")
             // Even out loud and quiet sounds: a gentle compressor with make-up gain (voices up, peaks down).

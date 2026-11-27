@@ -24,6 +24,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,7 +48,17 @@ private const val HOURS = 12
  * names stay put. On a TV the remote moves through the programmes. Pressing any of them plays the channel.
  */
 @Composable
-fun GuideGrid(channels: List<LiveTv.Channel>, now: Long, guideVersion: Int, wide: Boolean, onPlay: (LiveTv.Channel) -> Unit, modifier: Modifier = Modifier) {
+fun GuideGrid(
+    channels: List<LiveTv.Channel>, now: Long, guideVersion: Int, wide: Boolean, onPlay: (LiveTv.Channel) -> Unit, modifier: Modifier = Modifier,
+    /** Channel numbers to show (by key). */
+    numbers: Map<String, Int> = emptyMap(),
+    /** The channel to open on (the one watched last): scrolled to and selected. */
+    startKey: String? = null,
+    /** The selected channel, and programme (null on the channel's own cell). */
+    onFocus: ((LiveTv.Channel, LiveTv.Programme?) -> Unit)? = null,
+    /** The remote's Menu key (or holding OK) on a channel. */
+    onMenu: ((LiveTv.Channel) -> Unit)? = null,
+) {
     val start = remember(guideVersion) { (System.currentTimeMillis() / HALF_HOUR) * HALF_HOUR - HALF_HOUR }
     val end = start + HOURS * 3600_000L
     val perMin = if (wide) 4f else 3f
@@ -54,8 +69,27 @@ fun GuideGrid(channels: List<LiveTv.Channel>, now: Long, guideVersion: Int, wide
     val h = rememberScrollState()
     val clock = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val nowX = x(now)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState(channels.indexOfFirst { it.key == startKey }.coerceAtLeast(0))
+    val startFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var lastFocused by remember { androidx.compose.runtime.mutableStateOf<LiveTv.Channel?>(null) }
+    // On a TV the guide opens with the last channel selected (Back from the player: the one you zapped to).
+    androidx.compose.runtime.LaunchedEffect(startKey) {
+        if (startKey == null || !isTv) return@LaunchedEffect
+        val i = channels.indexOfFirst { it.key == startKey }
+        if (i < 0) return@LaunchedEffect
+        list.scrollToItem(i)
+        kotlinx.coroutines.delay(350)
+        runCatching { startFocus.requestFocus() }
+    }
 
-    Column(modifier.background(Palette.surface, RoundedCornerShape(14.dp)).border(1.dp, Palette.outline.copy(alpha = 0.5f), RoundedCornerShape(14.dp))) {
+    Column(modifier.background(Palette.surface, RoundedCornerShape(14.dp)).border(1.dp, Palette.outline.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+        .onPreviewKeyEvent { e ->
+            // Menu on the remote: the selected channel's menu.
+            if (onMenu != null && e.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_MENU) {
+                if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown) lastFocused?.let(onMenu)
+                true
+            } else false
+        }) {
         // Time ruler.
         Row(Modifier.fillMaxWidth().height(34.dp).background(Palette.surfaceHigh, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))) {
             Box(Modifier.width(nameW).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
@@ -76,12 +110,15 @@ fun GuideGrid(channels: List<LiveTv.Channel>, now: Long, guideVersion: Int, wide
                 }
             }
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = list) {
             uniqueItems(channels, key = { it.key }) { c ->
                 val programmes = remember(c, guideVersion, start) { LiveTv.programmes(c, start, end) }
                 Row(Modifier.fillMaxWidth().height(rowH)) {
-                    Row(Modifier.width(nameW).fillMaxHeight().card(RoundedCornerShape(8.dp), focusScale = 1.02f) { onPlay(c) }
+                    Row(Modifier.width(nameW).fillMaxHeight().then(if (c.key == startKey) Modifier.focusRequester(startFocus) else Modifier)
+                        .card(RoundedCornerShape(8.dp), focusScale = 1.02f, onFocus = { lastFocused = c; onFocus?.invoke(c, null) },
+                            onLongClick = onMenu?.let { m -> { m(c) } }) { onPlay(c) }
                         .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        numbers[c.key]?.let { Text("$it", style = MaterialTheme.typography.labelMedium, color = Palette.muted) }
                         if (wide) ChannelLogo(c, 34.dp)
                         Text(c.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
@@ -98,7 +135,8 @@ fun GuideGrid(channels: List<LiveTv.Channel>, now: Long, guideVersion: Int, wide
                                 val live = now in p.start until p.stop
                                 val past = p.stop <= now
                                 Column(Modifier.offset(x = left + 2.dp).padding(vertical = 3.dp).width((right - left - 4.dp).coerceAtLeast(2.dp)).fillMaxHeight()
-                                    .card(RoundedCornerShape(8.dp), focusScale = 1.03f) { onPlay(c) }
+                                    .card(RoundedCornerShape(8.dp), focusScale = 1.03f, onFocus = { lastFocused = c; onFocus?.invoke(c, p) },
+                                        onLongClick = onMenu?.let { m -> { m(c) } }) { onPlay(c) }
                                     .background(if (live) Palette.accent.copy(alpha = 0.22f) else Palette.surfaceHigh, RoundedCornerShape(8.dp))
                                     .padding(horizontal = 8.dp, vertical = 5.dp),
                                     verticalArrangement = Arrangement.Center) {

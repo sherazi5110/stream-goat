@@ -246,6 +246,16 @@ object Settings {
     var liveCountry: String?
         get() = string("live_country", "").ifBlank { null }
         set(v) = put("live_country", v ?: "")
+    /** The TV guide's filters (Category, Language, Source), kept between visits like the country. */
+    var liveCategory: String
+        get() = string("live_category", "")
+        set(v) = put("live_category", v)
+    var liveLanguage: String
+        get() = string("live_language", "")
+        set(v) = put("live_language", v)
+    var liveSourceFilter: String
+        get() = string("live_source_filter", "working")
+        set(v) = put("live_source_filter", v)
 
     /** Whether the YouTube tab is shown (Settings → Appearance → Tabs). */
     var showYouTube: Boolean

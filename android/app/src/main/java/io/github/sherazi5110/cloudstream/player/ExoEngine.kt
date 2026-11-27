@@ -152,6 +152,13 @@ class ExoEngine(context: Context) : PlaybackEngine {
         request = r
         ended = false
         opening = true
+        // Live TV: ExoPlayer starts an HLS channel on its lowest quality and is slow to step up; take the sharpest the
+        // screen shows from the start (as TiviMate does). Films keep adapting to the connection.
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
+            setForceHighestSupportedBitrate(r.live)
+            if (r.live) androidx.media3.common.util.Util.getCurrentDisplayModeSize(appContext).let { setMaxVideoSize(maxOf(it.x, it.y), minOf(it.x, it.y)) }
+            else clearVideoSizeConstraints()
+        }.build()
         val source = DefaultMediaSourceFactory(dataSourceFactory(r.headers)).createMediaSource(mediaItem(r))
         player.setMediaSource(source, r.startMs.coerceAtLeast(0))
         player.prepare()
