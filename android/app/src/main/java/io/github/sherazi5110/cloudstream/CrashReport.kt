@@ -116,6 +116,8 @@ object CrashReport {
                 appendLine("When: ${date(last.timestamp)}")
                 // What the screen was waiting for: the main thread's stack from Android's report.
                 if (last.reason == ApplicationExitInfo.REASON_ANR) mainThreadStack(last)?.let { appendLine(); appendLine(it) }
+                // Which library crashed: the readable lines of Android's tombstone (abort message, libraries, functions).
+                if (last.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) nativeStack(last)?.let { appendLine(); appendLine(it) }
             }
         }.getOrNull()
     }
@@ -128,6 +130,65 @@ object CrashReport {
         val end = text.indexOf("\n\n", start + 1).takeIf { it > 0 } ?: text.length
         text.substring(start + 1, end).lines().take(40).joinToString("\n")
     }.getOrNull()
+
+    /**
+     * A native crash's tombstone (Android 12+ gives it as protobuf): its readable strings in order, which are the
+     * abort message, the crashing thread and its frames' libraries and functions. Build ids and short register
+     * names are left out.
+     */
+    private fun nativeStack(info: ApplicationExitInfo): String? = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val bytes = info.traceInputStream?.use { it.readBytes() } ?: return null
+        tombstoneLines(bytes).takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "Native details:\n")
+    }.getOrNull()
+
+    /** The text fields of a protobuf message, in order, found by walking it (a field that isn't text is tried as a message). */
+    internal fun tombstoneLines(bytes: ByteArray, max: Int = 60): List<String> {
+        val out = LinkedHashSet<String>()
+        fun varint(at: IntArray, end: Int): Long? {
+            var v = 0L; var shift = 0
+            while (at[0] < end && shift < 64) {
+                val b = bytes[at[0]++].toInt() and 0xff
+                v = v or ((b and 0x7f).toLong() shl shift)
+                if (b < 0x80) return v
+                shift += 7
+            }
+            return null
+        }
+        // False when [from, end) isn't a well-formed message.
+        fun walk(from: Int, end: Int, depth: Int): Boolean {
+            val at = intArrayOf(from)
+            val found = mutableListOf<IntRange>()
+            while (at[0] < end) {
+                val key = varint(at, end) ?: return false
+                if (key shr 3 == 0L) return false
+                when ((key and 7).toInt()) {
+                    0 -> varint(at, end) ?: return false
+                    1 -> at[0] += 8
+                    5 -> at[0] += 4
+                    2 -> {
+                        val len = varint(at, end) ?: return false
+                        if (len < 0 || at[0] + len > end) return false
+                        found += at[0] until (at[0] + len).toInt()
+                        at[0] += len.toInt()
+                    }
+                    else -> return false
+                }
+                if (at[0] > end) return false
+            }
+            for (r in found) {
+                if (out.size >= max) break
+                val text = r.all { val c = bytes[it].toInt() and 0xff; c in 0x20..0x7e || c == 0x0a || c == 0x09 }
+                if (text && r.count() > 0) {
+                    val t = String(bytes, r.first, r.count()).trim()
+                    if (t.length >= 4 && !t.matches(Regex("[0-9a-fA-F]{16,}"))) out += t
+                } else if (depth < 8 && r.count() > 1) walk(r.first, r.last + 1, depth + 1)
+            }
+            return true
+        }
+        walk(0, bytes.size, 0)
+        return out.toList()
+    }
 
     internal fun header(): String {
         val version = runCatching { App.context.packageManager.getPackageInfo(App.context.packageName, 0).versionName }.getOrNull()
