@@ -201,7 +201,9 @@ fun LiveTvScreen() {
     var guideVersion by remember { mutableIntStateOf(0) }
     var force by remember { mutableStateOf(false) }
     // One source or all of them, as on Windows/Linux ("All sources ▾").
-    var sourceId by remember { mutableStateOf<String?>(null) }
+    // Kept in the settings: coming back from a channel (or the app) is on the same source, not "All sources" again.
+    var sourceId by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.liveSource) }
+    LaunchedEffect(sourceId) { io.github.sherazi5110.cloudstream.Settings.liveSource = sourceId }
     var pickingSource by remember { mutableStateOf(false) }
     LaunchedEffect(version, force, sourceId) {
         if (sourceId != null && LiveTv.sources().none { it.id == sourceId && it.enabled }) sourceId = null
@@ -316,7 +318,8 @@ private fun LiveContent(all: List<LiveTv.Channel>, now: Long, guideVersion: Int,
     val edge = if (wide) 40.dp else 16.dp
     // A TV or a tablet opens straight into the TV guide (TiviMate-style, with a live preview); phones get the cards.
     val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
-    var guide by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(isTv || tablet) }
+    var guide by remember { mutableStateOf(io.github.sherazi5110.cloudstream.Settings.liveGuideView ?: (isTv || tablet)) }
+    LaunchedEffect(guide) { if (guide != (io.github.sherazi5110.cloudstream.Settings.liveGuideView ?: (isTv || tablet))) io.github.sherazi5110.cloudstream.Settings.liveGuideView = guide }
 
     val toolbar: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
