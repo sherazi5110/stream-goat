@@ -5,6 +5,9 @@
 <p align="center"><b>Movies, series, anime and Live TV on Android phones, tablets and TV, Windows, Mac, Linux and the web.</b><br>
 Created by <b>Syed Ali Hamza</b></p>
 
+<p align="center"><a href="https://github.com/sherazi5110/Goat-HomeApp"><img src="https://img.shields.io/badge/%F0%9F%93%BA%20Goat%20Home%20App-Try%20now-b5f23d?style=for-the-badge" alt="Goat Home App: try now"></a><br>
+<sub>An ad-free home screen for Android TV and projectors, with CloudStream extensions and Live TV built in.</sub></p>
+
 ![Stream Goat: Home](docs/screenshots/home.jpg)
 
 > **Testing notes (11.0.0).** The Mac and Linux apps are built and checked automatically but haven't been tested by hand yet, so please report anything odd. On Windows the first launch after installing can be slow and laggy for a minute while the app sets itself up and loads an earlier backup; give it a moment and it runs smoothly after that.

@@ -90,6 +90,10 @@
   .more { text-align: center; margin-top: 22px; }
   .btn.coffee { background: #ffdd00; border-color: #ffdd00; color: #1a1205; }
   .btn.discord { background: #5865F2; border-color: #5865F2; color: #fff; }
+  .btn.home { background: #b5f23d; border-color: #b5f23d; color: #11160a; font-weight: 700; }
+  .homeapp { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; text-align: center; gap: 10px 16px; margin: 0 0 18px; padding: 12px 16px;
+    border: 1px solid rgba(181, 242, 61, .35); border-radius: 16px; background: rgba(181, 242, 61, .07); }
+  .homeapp span { color: var(--muted, #b8b8c8); }
   header.top nav a.donate { color: #1a1205; background: #ffdd00; padding: 2px 12px; border-radius: 999px; font-weight: 700; }
   header.top nav a.donate:hover { color: #1a1205; filter: brightness(1.08); }
   header.top nav a.discord { color: #fff; background: #5865F2; padding: 2px 12px; border-radius: 999px; font-weight: 700; }
@@ -164,6 +168,10 @@
 
 <div class="hero">
   <div class="wrap">
+    <div class="homeapp">
+      <a class="btn home" href="https://github.com/sherazi5110/Goat-HomeApp" target="_blank" rel="noopener">📺 Goat Home App · Try now</a>
+      <span>An ad-free home screen for Android TV and projectors, with CloudStream extensions and Live TV built in.</span>
+    </div>
     <a class="pill" href="#new"><b>New in 11.0.0</b> · watched everywhere, devices in sync, a better TV remote →</a>
     <h1>Stream Goat</h1>
     <p class="lead">Movies, series, anime and Live TV on <b>Android</b>, <b>Android TV</b>, <b>Windows</b>, <b>Mac</b>,
